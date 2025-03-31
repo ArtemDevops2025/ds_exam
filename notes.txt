@@ -39,10 +39,14 @@ git push --set-upstream origin test-docker-locally
 git push --set-upstream origin development
 
 
+terraform init -upgrade
+aws ec2 describe-instances --query "Reservations[*].Instances[*].[InstanceId,Tags[?Key=='Role'].Value|[0],PublicIpAddress,PrivateIpAddress]" --output table
+sudo systemctl status k3s
+ssh -i ds_exam_key.pem ubuntu@
 
 
 
-- [ ] [Set up project integrations](https://gitlab.com/gitlab-group-04041971/ds_exam_group/-/settings/integrations)
+
 
 ## Collaborate with your team
 
@@ -51,3 +55,4 @@ git push --set-upstream origin development
 - [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
 - [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
 - [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+- [ ] [Set up project integrations](https://gitlab.com/gitlab-group-04041971/ds_exam_group/-/settings/integrations)
