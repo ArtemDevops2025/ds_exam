@@ -35,7 +35,7 @@ http://127.0.0.1:8081/wp-admin
 git checkout -b
 git branch -a
 git branch -d
-
+git push --set-upstream origin test-docker-locally
 
 
 
