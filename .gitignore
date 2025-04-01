@@ -1,4 +1,5 @@
 .env
+ds_exam_key.pem
 # Local .terraform directories
 **/.terraform/*
 
