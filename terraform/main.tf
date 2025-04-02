@@ -15,6 +15,22 @@ module "vpc" {
   aws_region           = var.aws_region
 }
 
+module "k3s_cluster" {
+  source = "./modules/k3s-cluster"
+
+  project_name  = "ds-exam"  
+  environment   = "dev"      
+  region        = "eu-west-3" 
+  instance_type = "t3.medium"
+  key_name      = "ds_exam_key"  
+  vpc_id        = module.vpc.vpc_id  
+  subnet_ids    = module.vpc.public_subnet_ids  
+  node_count    = 3  # 1 master + 2 worker
+  
+}
+
+
+/*
 module "ec2" {
   source = "./modules/ec2"
 
@@ -27,3 +43,4 @@ module "ec2" {
   public_subnet_ids  = module.vpc.public_subnet_ids
   private_subnet_ids = module.vpc.private_subnet_ids
 }
+*/
