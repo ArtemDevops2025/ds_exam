@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# Put so much as possible in build.  It should be ready to run
 # Install and configure S3 plugin after WordPress is ready
 (
   # Wait for WordPress to be ready
@@ -10,7 +10,7 @@
   
   echo "WordPress is ready, installing S3 plugin..."
   
-  # Install WP-CLI if not already installed
+  # Install WP-CLI if not already installed      Should be in the Dockerfile file 14 -18   . Container should to able to run.
   if [ ! -f /usr/local/bin/wp ]; then
     curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
     chmod +x wp-cli.phar
