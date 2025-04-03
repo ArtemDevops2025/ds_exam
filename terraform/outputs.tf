@@ -38,3 +38,7 @@ output "instance_public_ips" {
 }
 */
 
+output "wordpress_url" {
+  description = "URL to access WordPress"
+  value       = "http://${module.k3s_cluster.master_public_ip}:80"
+}
