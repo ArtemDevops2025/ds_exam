@@ -16,6 +16,6 @@ rm $BACKUP_FILE
 
 echo "Backup completed: s3://$BUCKET_NAME/backups/$BACKUP_DATE/$BACKUP_FILE"
 
-# To do  
+# chmod +x backup-code.sh
 # crontab -e  0 0 * * * /home/a/backup-code.sh >> /home/a/backup.log 2>&1
 # Put it to CI/CD pipeline
