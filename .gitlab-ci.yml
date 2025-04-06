@@ -11,7 +11,9 @@ variables:
 
 validate:
   stage: validate
-  image: bitnami/kubectl:latest
+  image: alpine:latest  # Changed to alpine which has a shell
+  before_script:
+    - apk add --no-cache kubectl  # Install kubectl in the alpine image
   script:
     - echo "Validating Kubernetes manifests..."
     - for file in $KUBERNETES_DIR/*.yaml; do kubectl --dry-run=client -f $file; done
