@@ -6,7 +6,9 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    kubernetes.io/ingress.class: "nginx"  # Alternative to ingressClassName 
 spec:
+  ingressClassName: nginx  # ingress class
   rules:
   - http:
       paths:
