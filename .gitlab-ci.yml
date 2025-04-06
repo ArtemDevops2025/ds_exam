@@ -16,9 +16,10 @@ validate:
     - echo "Validating Kubernetes manifests..."
     - for file in $KUBERNETES_DIR/*.yaml; do kubectl --dry-run=client -f $file; done
     - echo "All Kubernetes manifests are valid!"
-  only:
-    - main
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "development"
 
 deploy:
   stage: deploy
@@ -47,8 +48,9 @@ deploy:
         sudo kubectl apply -f wordpress-loadbalancer.yaml"
     
     - echo "WordPress deployment completed successfully!"
-  only:
-    - main
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "development"
   environment:
     name: production
     url: http://$MASTER_IP
@@ -70,5 +72,6 @@ verify:
     - curl -s --retry 5 --retry-delay 10 -o /dev/null -w "%{http_code}" http://$MASTER_IP | grep -q 200
     
     - echo "Verification completed successfully!"
-  only:
-    - main
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "development"
