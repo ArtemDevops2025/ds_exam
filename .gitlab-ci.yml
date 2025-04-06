@@ -17,14 +17,12 @@ validate:
     - curl -LO "https://dl.k8s.io/release/v1.27.0/bin/linux/amd64/kubectl"
     - chmod +x kubectl
     - mv kubectl /usr/local/bin/
+    - which kubectl  # Check which kubectl is being used
   script:
     - echo "Validating Kubernetes manifests..."
-    - for file in $KUBERNETES_DIR/*.yaml; do kubectl --dry-run=client -f $file; done
+    - for file in $KUBERNETES_DIR/*.yaml; do /usr/local/bin/kubectl --dry-run=client -f $file; done
     - echo "All Kubernetes manifests are valid!"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "development"
+
 
 deploy:
   stage: deploy
