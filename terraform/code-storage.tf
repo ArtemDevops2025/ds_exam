@@ -50,3 +50,30 @@ output "code_storage_bucket_arn" {
   value = aws_s3_bucket.code_storage.arn
   description = "ARN of the S3 bucket for code storage"
 }
+
+#For terraform backup
+
+# Lifecycle policy for terraform state backups
+resource "aws_s3_bucket_lifecycle_configuration" "state_backup_lifecycle" {
+  bucket = aws_s3_bucket.code_storage.id
+
+  rule {
+    id = "terraform-state-backups"
+    status = "Enabled"
+    
+    filter {
+      prefix = "terraform-state-backups/"
+    }
+
+    # Keep the last 30 days of backups
+    expiration {
+      days = 30
+    }
+    
+    # Move older backups to cheaper storage
+    transition {
+      days          = 7
+      storage_class = "STANDARD_IA"
+    }
+  }
+}
