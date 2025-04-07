@@ -113,3 +113,42 @@ data "aws_ami" "ubuntu" {
     values = ["hvm"]
   }
 }
+
+#New
+# Elastic IP for master node
+resource "aws_eip" "k3s_master" {
+  count    = var.create_elastic_ips ? 1 : 0
+  domain   = "vpc"
+  
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-master-eip"
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+
+# Associate Elastic IP with master node
+resource "aws_eip_association" "k3s_master" {
+  count         = var.create_elastic_ips ? 1 : 0
+  instance_id   = aws_instance.k3s_master.id
+  allocation_id = aws_eip.k3s_master[0].id
+}
+
+# Elastic IPs for worker nodes
+resource "aws_eip" "k3s_worker" {
+  count    = var.create_elastic_ips ? var.worker_count : 0
+  domain   = "vpc"
+  
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-worker-${count.index + 1}-eip"
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+
+# Associate Elastic IPs with worker nodes
+resource "aws_eip_association" "k3s_worker" {
+  count         = var.create_elastic_ips ? var.worker_count : 0
+  instance_id   = aws_instance.k3s_worker[count.index].id
+  allocation_id = aws_eip.k3s_worker[count.index].id
+}

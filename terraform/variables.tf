@@ -63,3 +63,10 @@ variable "instance_count" {
   type        = number
   default     = 3  # 1 master, 2 workers
 }
+
+#Elastic IP
+variable "create_elastic_ips" {
+  description = "Whether to create and associate Elastic IPs"
+  type        = bool
+  default     = true
+}

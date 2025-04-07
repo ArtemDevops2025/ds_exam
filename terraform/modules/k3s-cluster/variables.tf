@@ -47,3 +47,9 @@ variable "node_count" {
 #   type        = string
 #   default     = "ds_exam_key.pem"
 # }
+
+variable "create_elastic_ips" {
+  description = "Whether to create and associate Elastic IPs"
+  type        = bool
+  default     = true
+}

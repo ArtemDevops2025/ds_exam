@@ -1,3 +1,4 @@
+
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -6,11 +7,11 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
-    kubernetes.io/ingress.class: "nginx"  # Alternative to ingressClassName 
 spec:
-  ingressClassName: nginx  # ingress class
+  ingressClassName: nginx
   rules:
-  - http:
+  - host: "13.37.209.198.nip.io"
+    http:
       paths:
       - path: /
         pathType: Prefix
@@ -19,3 +20,4 @@ spec:
             name: wordpress
             port:
               number: 80
+

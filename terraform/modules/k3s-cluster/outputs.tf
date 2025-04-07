@@ -1,17 +1,9 @@
-output "master_public_ip" {
-  description = "Public IP of the k3s master node"
-  value       = aws_instance.k3s_master.public_ip
-}
 
 output "master_private_ip" {
   description = "Private IP of the k3s master node"
   value       = aws_instance.k3s_master.private_ip
 }
 
-output "worker_public_ips" {
-  description = "Public IPs of the k3s worker nodes"
-  value       = aws_instance.k3s_worker[*].public_ip
-}
 
 output "worker_private_ips" {
   description = "Private IPs of the k3s worker nodes"
@@ -45,4 +37,16 @@ output "kubeconfig_instructions" {
 output "k3s_master_ssh_command" {
   description = "Command to SSH into the k3s master node"
   value       = "ssh -i YOUR_KEY_PATH ubuntu@${aws_instance.k3s_master.public_ip}"
+}
+
+
+#NEW Elastic IP
+output "master_public_ip" {
+  description = "Public IP of the K3s master node"
+  value       = var.create_elastic_ips ? aws_eip.k3s_master[0].public_ip : aws_instance.k3s_master.public_ip  # Updated resource name
+}
+
+output "worker_public_ips" {
+  description = "Public IPs of the K3s worker nodes"
+  value       = var.create_elastic_ips ? aws_eip.k3s_worker[*].public_ip : aws_instance.k3s_worker[*].public_ip
 }

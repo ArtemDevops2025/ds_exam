@@ -37,3 +37,9 @@ variable "private_subnet_ids" {
   description = "IDs of private subnets"
   type        = list(string)
 }
+
+variable "create_elastic_ips" {
+  description = "Whether to create and associate Elastic IPs"
+  type        = bool
+  default     = true
+}

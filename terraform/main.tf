@@ -26,7 +26,7 @@ module "k3s_cluster" {
   vpc_id        = module.vpc.vpc_id  
   subnet_ids    = module.vpc.public_subnet_ids  
   node_count    = 3  # 1 master + 2 worker
-  
+  create_elastic_ips = var.create_elastic_ips
 }
 
 

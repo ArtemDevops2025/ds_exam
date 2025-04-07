@@ -10,6 +10,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "SSH access"
   }
 
   # HTTP access
@@ -18,6 +19,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP access"
   }
 
   # HTTPS access
@@ -26,6 +28,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS access"
   }
 
   # k3s API
@@ -34,6 +37,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 6443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "K3s API server"
   }
 
   # NodePort services
@@ -42,6 +46,16 @@ resource "aws_security_group" "k3s" {
     to_port     = 32767
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "NodePort Services"
+  }
+
+  # ICMP (ping)
+  ingress {
+    from_port   = -1
+    to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow ping"
   }
 
   # Allow all internal traffic between nodes
@@ -50,6 +64,7 @@ resource "aws_security_group" "k3s" {
     to_port   = 0
     protocol  = "-1"
     self      = true
+    description = "Allow all traffic between cluster nodes"
   }
 
   # Allow all outbound traffic
@@ -58,6 +73,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
   }
 
   tags = {
@@ -169,4 +185,42 @@ resource "aws_instance" "k3s_worker" {
     Environment = var.environment
     Role        = "worker"
   }
+}
+
+# Elastic IP for master node
+resource "aws_eip" "k3s_master" {
+  count    = var.create_elastic_ips ? 1 : 0
+  domain   = "vpc"
+  
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-master-eip"
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+
+# Associate Elastic IP with master node
+resource "aws_eip_association" "k3s_master" {
+  count         = var.create_elastic_ips ? 1 : 0
+  instance_id   = aws_instance.k3s_master.id
+  allocation_id = aws_eip.k3s_master[0].id
+}
+
+# Elastic IPs for worker nodes
+resource "aws_eip" "k3s_worker" {
+  count    = var.create_elastic_ips ? var.node_count - 1 : 0
+  domain   = "vpc"
+  
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-worker-${count.index + 1}-eip"
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+
+# Associate Elastic IPs with worker nodes
+resource "aws_eip_association" "k3s_worker" {
+  count         = var.create_elastic_ips ? var.node_count - 1 : 0
+  instance_id   = aws_instance.k3s_worker[count.index].id
+  allocation_id = aws_eip.k3s_worker[count.index].id
 }
