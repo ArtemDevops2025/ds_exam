@@ -56,7 +56,7 @@ deploy:
         sudo kubectl apply -f wordpress-deployment.yaml && \
         sudo kubectl apply -f wordpress-service.yaml && \
         sudo kubectl apply -f wordpress-loadbalancer.yaml && \
-        sudo kubectl apply -f wordpress-ingress.yaml"
+        sudo kubectl apply -f wordpress-ingress.yaml'"
     
     - echo "WordPress deployment completed successfully!"
   rules:
