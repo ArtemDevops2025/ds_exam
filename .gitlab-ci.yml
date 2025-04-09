@@ -7,12 +7,12 @@ stages:
   - cleanup
 
 variables:
-  MASTER_IP: ""  # This will be overridden by CI/CD variable
+  MASTER_IP: ""  # CI/CD variable
   SSH_KEY_NAME: "ds_exam_key"
   KUBERNETES_DIR: "kubernetes"
   REMOTE_DIR: "wordpress"
   WORDPRESS_PORT: "30080"  # NodePort for ingress
-  DEPLOYMENT_TIMEOUT: "300"  # 5 minutes timeout for deployments
+  DEPLOYMENT_TIMEOUT: "300"  
 
 # Make sure all files follow best practices
 lint:
@@ -135,7 +135,7 @@ deploy:
       echo \"Waiting for services to be assigned IPs...\" &&
       timeout 60 bash -c \"until sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath='{.spec.clusterIP}' | grep -q -v none; do sleep 2; done\" || echo \"Service IP assignment timed out but continuing\"'"
     
-    # Ingress configuration (last to ensure dependencies are ready)
+    # Ingress configuration 
     - echo "Configuring ingress..."
     - |
       ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
@@ -168,7 +168,6 @@ verify:
     - echo "Starting verification at $(date)"
   script:
     # Check resources status
-    - echo "Verifying Kubernetes resources status..."
     - |
       echo "Pod Status:"
       ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n wordpress -o wide'"
@@ -186,25 +185,25 @@ verify:
     - sleep 30
     
     # Check application accessibility - ClusterIP
-    - echo "Checking WordPress availability via LoadBalancer cluster IP..."
     - |
+      echo "Checking WordPress availability via LoadBalancer cluster IP..."
       RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'export CLUSTER_IP=\$(sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath={.spec.clusterIP}) && curl -s --retry 5 --retry-delay 10 -o /dev/null -w %%{http_code} http://\${CLUSTER_IP}'") || echo "LoadBalancer check failed, but continuing verification"
-    - echo "ClusterIP Check Result: $RESPONSE"
-    - if [[ "$RESPONSE" == "200" ]]; then echo "✅ ClusterIP check passed"; else echo "⚠️ ClusterIP check returned non-200 response"; fi
+      echo "ClusterIP Check Result: $RESPONSE"
+      if [[ "$RESPONSE" == "200" ]]; then echo "✅ ClusterIP check passed"; else echo "⚠️ ClusterIP check returned non-200 response"; fi
     
     # Check application accessibility - NodePort
-    - echo "Checking WordPress availability via NodePort..."
     - |
+      echo "Checking WordPress availability via NodePort..."
       RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -o /dev/null -w %%{http_code} http://$MASTER_IP:32412'") || echo "NodePort check failed, but continuing verification"
-    - echo "NodePort Check Result: $RESPONSE"
-    - if [[ "$RESPONSE" == "200" ]]; then echo "✅ NodePort check passed"; else echo "⚠️ NodePort check returned non-200 response"; fi
+      echo "NodePort Check Result: $RESPONSE"
+      if [[ "$RESPONSE" == "200" ]]; then echo "✅ NodePort check passed"; else echo "⚠️ NodePort check returned non-200 response"; fi
     
     # Check application accessibility - Ingress
-    - echo "Checking WordPress availability via Ingress..."
     - |
+      echo "Checking WordPress availability via Ingress..."
       RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -H \"Host: 13.37.209.198.nip.io\" -o /dev/null -w %%{http_code} http://localhost:30080'") || echo "Ingress check failed, but continuing verification"
-    - echo "Ingress Check Result: $RESPONSE"
-    - if [[ "$RESPONSE" == "200" ]]; then echo "✅ Ingress check passed"; else echo "⚠️ Ingress check returned non-200 response"; fi
+      echo "Ingress Check Result: $RESPONSE"
+      if [[ "$RESPONSE" == "200" ]]; then echo "✅ Ingress check passed"; else echo "⚠️ Ingress check returned non-200 response"; fi
     
     # Summary
     - echo "Verification completed at $(date)!"
