@@ -48,7 +48,7 @@ deploy:
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/*.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR/
     
     - echo "Applying Kubernetes manifests..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && \
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && \
         sudo kubectl apply -f namespace.yaml && \
         sudo kubectl apply -f s3-secret.yaml && \
         sudo kubectl apply -f wordpress-pvc.yaml && \
