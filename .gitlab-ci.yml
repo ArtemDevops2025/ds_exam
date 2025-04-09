@@ -8,6 +8,7 @@ variables:
   SSH_KEY_NAME: "ds_exam_key"
   KUBERNETES_DIR: "kubernetes"
   REMOTE_DIR: "wordpress"
+  WORDPRESS_PORT: "30080"  # Updated to use the NodePort for ingress
 
 validate:
   stage: validate
@@ -55,7 +56,8 @@ deploy:
         sudo kubectl apply -f mysql-deployment.yaml && \
         sudo kubectl apply -f wordpress-deployment.yaml && \
         sudo kubectl apply -f wordpress-service.yaml && \
-        sudo kubectl apply -f wordpress-loadbalancer.yaml"
+        sudo kubectl apply -f wordpress-loadbalancer.yaml && \
+        sudo kubectl apply -f wordpress-ingress.yaml"
     
     - echo "WordPress deployment completed successfully!"
   rules:
@@ -63,7 +65,7 @@ deploy:
     - if: $CI_COMMIT_BRANCH == "development"
   environment:
     name: production
-    url: http://$MASTER_IP
+    url: http://$MASTER_IP:$WORDPRESS_PORT
 
 verify:
   stage: verify
@@ -77,9 +79,13 @@ verify:
   script:
     - echo "Verifying deployment status..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get all -n wordpress"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get ingress -n wordpress"
     
-    - echo "Checking WordPress availability..."
-    - curl -s --retry 5 --retry-delay 10 -o /dev/null -w "%{http_code}" http://$MASTER_IP | grep -q 200
+    - echo "Checking WordPress availability via LoadBalancer..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "curl -s --retry 5 --retry-delay 10 -o /dev/null -w \"%{http_code}\" http://localhost:32412" | grep -q 200
+    
+    - echo "Checking WordPress availability via Ingress..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "curl -s --retry 5 --retry-delay 10 -o /dev/null -w \"%{http_code}\" http://localhost:30080" | grep -q 200
     
     - echo "Verification completed successfully!"
   rules:
