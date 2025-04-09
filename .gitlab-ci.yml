@@ -115,8 +115,8 @@ deploy:
       ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
       sudo kubectl apply -f mysql-deployment.yaml &&
       echo \"Waiting for MySQL to be ready...\" &&
-      timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l app=mysql -o jsonpath='{.items[0].status.phase}' | grep -q Running; do sleep 5; done\" || echo \"MySQL deployment timed out but continuing\"'"
-    
+      #timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l app=mysql -o jsonpath='{.items[0].status.phase}' | grep -q Running; do sleep 5; done\" || echo \"MySQL deployment timed out but continuing\"'"
+      timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l app=wordpress-mysql -o jsonpath='{.items[0].status.phase}' | grep -q Running; do sleep 5; done\" || echo \"MySQL deployment timed out but continuing\"'"
     # Application deployment
     - echo "Deploying WordPress application..."
     - |
