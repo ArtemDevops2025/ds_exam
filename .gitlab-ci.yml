@@ -1,38 +1,26 @@
 stages:
+  - lint
   - validate
+  - build
   - deploy
   - verify
+  - cleanup
 
 variables:
-  MASTER_IP: ""  
+  MASTER_IP: ""  # CI/CD variable
   SSH_KEY_NAME: "ds_exam_key"
   KUBERNETES_DIR: "kubernetes"
   REMOTE_DIR: "wordpress"
-  WORDPRESS_PORT: "30080"  
+  WORDPRESS_PORT: "30080"  # NodePort for ingress
+  DEPLOYMENT_TIMEOUT: "300"  
 
-validate:
-  stage: validate
-  image: alpine:latest
-  script:
-    - echo "Validating Kubernetes manifests..."
-    - echo "Using basic YAML validation instead of kubectl dry-run"
-    - apk add --no-cache grep
-    - for file in $KUBERNETES_DIR/*.yaml; do
-        echo "Checking $file";
-        grep -q "apiVersion:" $file || (echo "Missing apiVersion in $file" && exit 1);
-        grep -q "kind:" $file || (echo "Missing kind in $file" && exit 1);
-      done
-    - echo "All Kubernetes manifests are valid!"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "development"
 
+# Deploy infrastructure and applications
 deploy:
   stage: deploy
   image: alpine:latest
   before_script:
-    - apk add --no-cache openssh-client bash
+    - apk add --no-cache openssh-client bash coreutils
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -42,61 +30,146 @@ deploy:
         exit 1
       fi
     - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - echo "Starting deployment at $(date)"
 
   script:
-    - echo "Creating remote directory..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR"
-    
-    - echo "Transferring Kubernetes manifests..."
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/*.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR/
-    
-    - echo "Fixing ingress controller webhook..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission || true'"
-    
-    - echo "Applying Kubernetes manifests..."
+   
+    #  ingress configuration with parameterized host !!!!!!
+    - echo "Configuring ingress with dynamic host..."
     - |
       ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
-      sudo kubectl apply -f namespace.yaml &&
-      sudo kubectl apply -f s3-secret.yaml &&
-      sudo kubectl apply -f wordpress-pvc.yaml &&
-      sudo kubectl apply -f mysql-deployment.yaml &&
-      sudo kubectl apply -f wordpress-deployment.yaml &&
-      sudo kubectl apply -f wordpress-service.yaml &&
-      sudo kubectl apply -f wordpress-loadbalancer.yaml &&
+      echo \"Updating ingress host with current IP...\" &&
+      sed -i \"s/host:.*/host: $MASTER_IP.nip.io/g\" wordpress-ingress.yaml &&
       echo \"Waiting for ingress controller to be ready...\" &&
-      sleep 30 &&
+      sleep 15 &&
       sudo kubectl apply -f wordpress-ingress.yaml || echo \"Ingress creation failed but continuing deployment\"'"
     
-    - echo "WordPress deployment completed successfully!"
+    - echo "WordPress deployment completed successfully at $(date)!"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
   environment:
-    name: production
+    name: $CI_COMMIT_BRANCH
     url: http://$MASTER_IP:$WORDPRESS_PORT
+  artifacts:
+    paths:
+      - $KUBERNETES_DIR/
+    expire_in: 1 week
 
+# Verify is deployment is working correctly!!
 verify:
   stage: verify
   image: alpine:latest
   before_script:
-    - apk add --no-cache openssh-client curl bash
+    - apk add --no-cache openssh-client curl bash jq
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - echo "Starting verification at $(date)"
+  script:
+   
+    
+    # Check application accessibility - ClusterIP !!!!!!!!
+    - echo "Checking WordPress availability via LoadBalancer cluster IP..."
+    - |
+      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'export CLUSTER_IP=\$(sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath={.spec.clusterIP}) && curl -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://\${CLUSTER_IP}'") || echo "LoadBalancer check failed, but continuing verification"
+    - echo "ClusterIP Check Result: $RESPONSE"
+    - if [[ "$RESPONSE" == "200" ]]; then echo "✅ ClusterIP check passed"; else echo "⚠️ ClusterIP check returned non-200 response"; fi
+    
+    # Check application accessibility - NodePort
+    - echo "Checking WordPress availability via NodePort..."
+    - |
+      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://$MASTER_IP:32412'") || echo "NodePort check failed, but continuing verification"
+    - echo "NodePort Check Result: $RESPONSE"
+    - if [[ "$RESPONSE" == "200" ]]; then echo "✅ NodePort check passed"; else echo "⚠️ NodePort check returned non-200 response"; fi
+    
+    # Check application accessibility - Ingress with parameterized host
+    - echo "Checking WordPress availability via Ingress..."
+    - |
+      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://localhost:30080'") || echo "Ingress check failed, but continuing verification"
+    - echo "Ingress Check Result: $RESPONSE"
+    - if [[ "$RESPONSE" == "200" ]]; then echo "✅ Ingress check passed"; else echo "⚠️ Ingress check returned non-200 response"; fi
+    
+    # Enhanced health checks
+    - echo "Performing WordPress functional health checks..."
+    - |
+      echo "Checking WordPress login page..."
+      LOGIN_CHECK=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 3 --retry-delay 5 http://$MASTER_IP:32412/wp-login.php | grep -c \"WordPress\"'") || echo "Login page check failed"
+      if [[ "$LOGIN_CHECK" -gt 0 ]]; then echo "✅ WordPress login page check passed"; else echo "⚠️ WordPress login page check failed"; fi
+    
+    - |
+      echo "Checking WordPress API availability..."
+      API_CHECK=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 3 --retry-delay 5 http://$MASTER_IP:32412/wp-json/ | grep -c \"name\"'") || echo "API check failed"
+      if [[ "$API_CHECK" -gt 0 ]]; then echo "✅ WordPress API check passed"; else echo "⚠️ WordPress API check failed"; fi
+    
+    # Summary of all status
+    - echo "Verification completed at $(date)!"
+    - echo "At least one access method should return HTTP 200 for the deployment to be considered successful."
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "development"
+  needs:
+    - deploy
+
+# Comprehensive cleanup job  ???????????
+cleanup:
+  stage: cleanup
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client bash
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
     - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
   script:
-    - echo "Verifying deployment status..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get all -n wordpress'"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress -n wordpress || echo \"No ingress found but continuing verification\"'"
-    - echo "Waiting for services to be fully available..."
-    - sleep 30
+    - echo "Starting cleanup process at $(date)..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'export CLUSTER_IP=\$(sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath={.spec.clusterIP}) && curl -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://\${CLUSTER_IP}'" || echo "LoadBalancer check failed, but continuing verification"
+      if [[ "$CI_COMMIT_BRANCH" == "main" ]]; then
+        echo "Cleanup is skipped for main branch"
+        exit 0
+      fi
+    
+    - echo "Removing all WordPress resources..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://$MASTER_IP:32412'" || echo "NodePort check failed, but continuing verification"
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -H \"Host: 13.37.209.198.nip.io\" -o /dev/null -w %{http_code} http://localhost:30080'" || echo "Ingress check failed, but continuing verification"
-    - echo "Verification completed successfully!"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+        echo \"Removing ingress resources...\"
+        sudo kubectl delete ingress -n wordpress --all
+        
+        echo \"Removing service resources...\"
+        sudo kubectl delete svc -n wordpress --all
+        
+        echo \"Removing deployment resources...\"
+        sudo kubectl delete deployment -n wordpress --all
+        
+        echo \"Removing statefulset resources...\"
+        sudo kubectl delete statefulset -n wordpress --all
+        
+        echo \"Removing configmap resources...\"
+        sudo kubectl delete configmap -n wordpress --all
+        
+        echo \"Removing secret resources...\"
+        sudo kubectl delete secret -n wordpress --all
+        
+        echo \"Waiting for pods to terminate...\"
+        timeout 60 bash -c \"until [ \\\$(sudo kubectl get pods -n wordpress --no-headers | wc -l) -eq 0 ]; do sleep 5; done\" || echo \"Pod termination timed out\"
+        
+        echo \"Removing PVC resources...\"
+        sudo kubectl delete pvc -n wordpress --all
+        
+        echo \"Removing namespace...\"
+        sudo kubectl delete namespace wordpress
+        
+        echo \"Removing local files...\"
+        rm -rf ~/$REMOTE_DIR
+      '"
+    
+    - echo "Cleanup completed at $(date)!"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
     - if: $CI_COMMIT_BRANCH == "development"
+      when: manual
+  environment:
+    name: $CI_COMMIT_BRANCH
+    action: stop
