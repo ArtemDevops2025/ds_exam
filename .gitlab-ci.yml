@@ -4,7 +4,7 @@ stages:
   - verify
 
 variables:
-  MASTER_IP: ""  # This will be overridden by CI/CD variable
+  MASTER_IP: ""  
   SSH_KEY_NAME: "ds_exam_key"
   KUBERNETES_DIR: "kubernetes"
   REMOTE_DIR: "wordpress"
@@ -105,6 +105,7 @@ verify:
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -H \"Host: 13.37.209.198.nip.io\" -o /dev/null -w \"%{http_code}\" http://localhost:30080'" | grep -q "200\|302" || echo "Ingress check failed, but continuing verification"
     
     - echo "Verification completed successfully!"
+    - echo "Yes!"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
