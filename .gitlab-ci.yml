@@ -4,11 +4,11 @@ stages:
   - verify
 
 variables:
-  MASTER_IP: ""
+  MASTER_IP: ""  # This will be overridden by CI/CD variable
   SSH_KEY_NAME: "ds_exam_key"
   KUBERNETES_DIR: "kubernetes"
   REMOTE_DIR: "wordpress"
-  WORDPRESS_PORT: "30080"  # Updated to use the NodePort for ingress
+  WORDPRESS_PORT: "30080"  # NodePort for ingress
 
 validate:
   stage: validate
@@ -36,9 +36,12 @@ deploy:
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    - |
+      if [ -z "$MASTER_IP" ]; then
+        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
+        exit 1
+      fi
     - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-    - ls -la ~/.ssh/
-    - head -n 1 ~/.ssh/$SSH_KEY_NAME.pem 
 
   script:
     - echo "Creating remote directory..."
@@ -48,15 +51,16 @@ deploy:
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/*.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR/
     
     - echo "Applying Kubernetes manifests..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && \
-        sudo kubectl apply -f namespace.yaml && \
-        sudo kubectl apply -f s3-secret.yaml && \
-        sudo kubectl apply -f wordpress-pvc.yaml && \
-        sudo kubectl apply -f mysql-deployment.yaml && \
-        sudo kubectl apply -f wordpress-deployment.yaml && \
-        sudo kubectl apply -f wordpress-service.yaml && \
-        sudo kubectl apply -f wordpress-loadbalancer.yaml && \
-        sudo kubectl apply -f wordpress-ingress.yaml'"
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
+      sudo kubectl apply -f namespace.yaml &&
+      sudo kubectl apply -f s3-secret.yaml &&
+      sudo kubectl apply -f wordpress-pvc.yaml &&
+      sudo kubectl apply -f mysql-deployment.yaml &&
+      sudo kubectl apply -f wordpress-deployment.yaml &&
+      sudo kubectl apply -f wordpress-service.yaml &&
+      sudo kubectl apply -f wordpress-loadbalancer.yaml &&
+      sudo kubectl apply -f wordpress-ingress.yaml'"
     
     - echo "WordPress deployment completed successfully!"
   rules:
@@ -72,19 +76,19 @@ verify:
   before_script:
     - apk add --no-cache openssh-client curl bash
     - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
     - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
   script:
     - echo "Verifying deployment status..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get all -n wordpress"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get ingress -n wordpress"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get all -n wordpress'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress -n wordpress'"
     
     - echo "Checking WordPress availability via LoadBalancer..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "curl -s --retry 5 --retry-delay 10 -o /dev/null -w \"%{http_code}\" http://localhost:32412" | grep -q 200
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -o /dev/null -w \"%{http_code}\" http://localhost:32412'" | grep -q 200
     
     - echo "Checking WordPress availability via Ingress..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "curl -s --retry 5 --retry-delay 10 -o /dev/null -w \"%{http_code}\" http://localhost:30080" | grep -q 200
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -o /dev/null -w \"%{http_code}\" http://localhost:30080'" | grep -q 200
     
     - echo "Verification completed successfully!"
   rules:
