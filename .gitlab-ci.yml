@@ -4,11 +4,11 @@ stages:
   - verify
 
 variables:
-  MASTER_IP: ""  # This will be overridden by CI/CD variable
+  MASTER_IP: ""  
   SSH_KEY_NAME: "ds_exam_key"
   KUBERNETES_DIR: "kubernetes"
   REMOTE_DIR: "wordpress"
-  WORDPRESS_PORT: "30080"  # NodePort for ingress
+  WORDPRESS_PORT: "30080"  
 
 validate:
   stage: validate
