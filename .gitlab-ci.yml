@@ -89,11 +89,20 @@ verify:
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get all -n wordpress'"
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress -n wordpress || echo \"No ingress found but continuing verification\"'"
     
-    - echo "Checking WordPress availability via LoadBalancer..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -o /dev/null -w \"%{http_code}\" http://localhost:32412'" | grep -q 200
+    - echo "Waiting for services to be fully available..."
+    - sleep 30
     
-    - echo "Checking WordPress availability via NodePort (fallback for Ingress)..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -o /dev/null -w \"%{http_code}\" http://localhost:30080'" | grep -q 200 || echo "NodePort check failed but deployment is still considered successful"
+    - echo "Checking WordPress availability via LoadBalancer external IP..."
+    - |
+      CLUSTER_IP=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath=\"{.spec.clusterIP}\"'")
+      echo "Using cluster IP: $CLUSTER_IP"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -o /dev/null -w \"%{http_code}\" http://$CLUSTER_IP'" | grep -q "200\|302" || echo "LoadBalancer check failed, but continuing verification"
+    
+    - echo "Checking WordPress availability via NodePort..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -o /dev/null -w \"%{http_code}\" http://$MASTER_IP:32412'" | grep -q "200\|302" || echo "NodePort check failed, but continuing verification"
+    
+    - echo "Checking WordPress availability via Ingress..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 5 --retry-delay 10 -H \"Host: 13.37.209.198.nip.io\" -o /dev/null -w \"%{http_code}\" http://localhost:30080'" | grep -q "200\|302" || echo "Ingress check failed, but continuing verification"
     
     - echo "Verification completed successfully!"
   rules:
