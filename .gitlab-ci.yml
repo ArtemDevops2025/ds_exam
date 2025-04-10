@@ -296,6 +296,11 @@ verify:
       echo "NodePort Check Result: $RESPONSE"
       if [[ "$RESPONSE" == "200" ]]; then echo "✅ NodePort check passed"; else echo "⚠️ NodePort check returned non-200 response"; fi
     
+    # Check Ingress controller status
+    - |
+      echo "Checking Ingress controller status..."
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n ingress-nginx -l app.kubernetes.io/component=controller -o wide || echo \"Ingress controller not found in standard namespace\"'"
+    
     # Verify Ingress host configuration
     - |
       echo "Verifying Ingress host configuration..."
@@ -305,14 +310,21 @@ verify:
     
     # Wait longer for Ingress rules to propagate
     - echo "Waiting for Ingress rules to propagate..."
-    - sleep 30
+    - sleep 45
     
-    # Check application accessibility - Ingress with parameterized host
+    # Try multiple approaches to test Ingress
     - |
-      echo "Checking WordPress availability via Ingress..."
-      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://localhost:30080'") || echo "Ingress check failed, but continuing verification"
-      echo "Ingress Check Result: $RESPONSE"
+      echo "Checking WordPress availability via Ingress (direct node access)..."
+      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://$MASTER_IP:30080'") || echo "Ingress check failed, but continuing verification"
+      echo "Ingress Check Result (direct node): $RESPONSE"
       if [[ "$RESPONSE" == "200" ]]; then echo "✅ Ingress check passed"; else echo "⚠️ Ingress check returned non-200 response"; fi
+      
+      if [[ "$RESPONSE" != "200" ]]; then
+        echo "Trying alternative Ingress access method..."
+        RESPONSE2=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://127.0.0.1:30080'") || echo "Alternative Ingress check failed"
+        echo "Alternative Ingress Check Result: $RESPONSE2"
+        if [[ "$RESPONSE2" == "200" ]]; then echo "✅ Alternative Ingress check passed"; fi
+      fi
     
     # Enhanced health checks (with redirect following)
     - |
