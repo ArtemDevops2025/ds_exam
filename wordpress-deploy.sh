@@ -156,7 +156,7 @@ ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get all -n wordpress"
 echo "Verifying ingress deployment..."
 ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get ingress -n wordpress"
 
-echo "WordPress deployment automation complete!"
+#echo "WordPress deployment automation complete!"
 echo "Access your WordPress site at:"
 echo "- Load Balancer: http://$MASTER_IP"
 echo "- Ingress: http://$MASTER_IP.nip.io"
