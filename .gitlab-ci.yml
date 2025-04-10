@@ -73,7 +73,7 @@ build:
     
     # Execute the QA test script to create test files
     - echo "Creating QA test scripts..."
-    - bash /home/a/IT/GroupExam/ds_exam_group/scripts/qa-tests.sh
+    - bash scripts/qa-tests.sh
     
     # Generate MySQL service patch file
     - mkdir -p $KUBERNETES_DIR/patches
