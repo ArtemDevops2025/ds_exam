@@ -302,6 +302,78 @@ verify:
   needs:
     - deploy
 
+# Quality Assurance testing
+qa:
+  stage: qa
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client curl bash php php-mysqli
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - echo "Starting QA tests at $(date)"
+  script:
+    # Run API tests
+    - echo "Running WordPress API tests..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && 
+      ./api-tests.sh $MASTER_IP'"
+    
+    # Run unit tests inside WordPress pod
+    - echo "Running WordPress unit tests..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+      WP_POD=\$(sudo kubectl get pod -l app=wordpress -n wordpress -o jsonpath=\"{.items[0].metadata.name}\")
+      echo "Using WordPress pod: \$WP_POD"
+      sudo kubectl cp ~/$REMOTE_DIR/unit-tests.php wordpress/\$WP_POD:/tmp/unit-tests.php
+      sudo kubectl exec \$WP_POD -n wordpress -- php /tmp/unit-tests.php
+      '"
+    
+    # Security scan
+    - echo "Running security scan..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+      echo \"Checking for exposed sensitive endpoints...\"
+      ADMIN_EXPOSED=\$(curl -s -o /dev/null -w \"%{http_code}\" http://$MASTER_IP:32412/wp-admin/install.php)
+      if [ \"\$ADMIN_EXPOSED\" == \"200\" ] || [ \"\$ADMIN_EXPOSED\" == \"302\" ]; then
+        echo \"⚠️ Warning: WordPress installation page might be accessible\"
+      else
+        echo \"✅ WordPress installation page properly secured\"
+      fi
+      
+      echo \"Checking WordPress version disclosure...\"
+      VERSION_CHECK=\$(curl -s http://$MASTER_IP:32412 | grep -c \"meta name=\\\"generator\\\"\" || true)
+      if [ \"\$VERSION_CHECK\" -gt 0 ]; then
+        echo \"⚠️ Warning: WordPress version might be exposed in HTML\"
+      else
+        echo \"✅ WordPress version properly hidden\"
+      fi
+      '"
+    
+    # Performance test
+    - echo "Running basic performance test..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+      echo \"Testing response time...\"
+      RESPONSE_TIME=\$(curl -s -w \"Time: %{time_total}s\n\" -o /dev/null http://$MASTER_IP:32412)
+      echo \"\$RESPONSE_TIME\"
+      
+      echo \"Testing concurrent connections...\"
+      for i in {1..5}; do
+        curl -s http://$MASTER_IP:32412 > /dev/null &
+      done
+      wait
+      echo \"Concurrent connection test completed\"
+      '"
+    
+    - echo "QA testing completed at $(date)!"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "development"
+  needs:
+    - verify
+  allow_failure: true
 # Comprehensive cleanup job
 cleanup:
   stage: cleanup
