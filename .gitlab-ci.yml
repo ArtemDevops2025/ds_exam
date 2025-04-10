@@ -4,6 +4,7 @@ stages:
   - build
   - deploy
   - verify
+  - qa
   - cleanup
 
 variables:
