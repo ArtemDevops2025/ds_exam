@@ -253,7 +253,7 @@ deploy:
     expire_in: 1 week
 
 
-# Verify deployment is working correctly
+# Verify deployment is working correctly  !!!!!!!!!!!!!!
 verify:
   stage: verify
   image: alpine:latest
@@ -299,31 +299,37 @@ verify:
     # Check Ingress controller status
     - |
       echo "Checking Ingress controller status..."
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n ingress-nginx -l app.kubernetes.io/component=controller -o wide || echo \"Ingress controller not found in standard namespace\"'"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n ingress-nginx || echo \"Checking alternative namespace...\" && sudo kubectl get pods -n kube-system -l app.kubernetes.io/name=ingress-nginx || echo \"Ingress controller not found in standard namespaces\"'"
     
     # Verify Ingress host configuration
     - |
       echo "Verifying Ingress host configuration..."
       INGRESS_HOST=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress wordpress-ingress -n wordpress -o jsonpath=\"{.spec.rules[0].host}\"'")
       echo "Configured Ingress host: $INGRESS_HOST"
-      echo "Using host header: $MASTER_IP.nip.io"
     
     # Wait longer for Ingress rules to propagate
     - echo "Waiting for Ingress rules to propagate..."
-    - sleep 45
+    - sleep 60
     
-    # Try multiple approaches to test Ingress
+    # Try direct access to Ingress without port (matching wordpress-deploy.sh)
     - |
-      echo "Checking WordPress availability via Ingress (direct node access)..."
-      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://$MASTER_IP:30080'") || echo "Ingress check failed, but continuing verification"
-      echo "Ingress Check Result (direct node): $RESPONSE"
+      echo "Checking WordPress availability via Ingress (direct access)..."
+      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://$MASTER_IP.nip.io'") || echo "Ingress check failed, but continuing verification"
+      echo "Ingress Check Result (direct access): $RESPONSE"
       if [[ "$RESPONSE" == "200" ]]; then echo "✅ Ingress check passed"; else echo "⚠️ Ingress check returned non-200 response"; fi
       
       if [[ "$RESPONSE" != "200" ]]; then
-        echo "Trying alternative Ingress access method..."
-        RESPONSE2=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://127.0.0.1:30080'") || echo "Alternative Ingress check failed"
-        echo "Alternative Ingress Check Result: $RESPONSE2"
+        echo "Trying alternative Ingress access methods..."
+        
+        echo "Method 1: Using Host header with direct IP..."
+        RESPONSE2=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://$MASTER_IP'") || echo "Alternative Ingress check failed"
+        echo "Alternative Ingress Check Result (Method 1): $RESPONSE2"
         if [[ "$RESPONSE2" == "200" ]]; then echo "✅ Alternative Ingress check passed"; fi
+        
+        echo "Method 2: Using NodePort 30080..."
+        RESPONSE3=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://$MASTER_IP:30080'") || echo "Alternative Ingress check failed"
+        echo "Alternative Ingress Check Result (Method 2): $RESPONSE3"
+        if [[ "$RESPONSE3" == "200" ]]; then echo "✅ Alternative Ingress check passed"; fi
       fi
     
     # Enhanced health checks (with redirect following)
