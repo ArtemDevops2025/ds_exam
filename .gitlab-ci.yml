@@ -237,7 +237,7 @@ deploy:
       echo \"Updating ingress host with current IP...\" &&
       sed -i \"s/host:.*/host: $MASTER_IP.nip.io/g\" wordpress-ingress.yaml &&
       echo \"Waiting for ingress controller to be ready...\" &&
-      sleep 15 &&
+      sleep 45 &&
       sudo kubectl apply -f wordpress-ingress.yaml || echo \"Ingress creation failed but continuing deployment\"'"
     
     - echo "WordPress deployment completed successfully at $(date)!"
@@ -280,7 +280,7 @@ verify:
       ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pvc -n wordpress'"
     
     - echo "Waiting for services to be fully available..."
-    - sleep 30
+    - sleep 45
     
     # Check application accessibility - ClusterIP
     - |
