@@ -109,19 +109,19 @@ deploy:
       echo \"Creating persistent volumes...\" &&
       sudo kubectl apply -f wordpress-pvc.yaml'"
     
-    # Database deployment with correct label selector
+    # Database deployment
     - echo "Deploying database..."
     - |
       ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
       sudo kubectl apply -f mysql-deployment.yaml &&
       echo \"Waiting for MySQL to be ready...\" &&
-      timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l tier=mysql -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"MySQL deployment timed out but continuing\" &&
-      
-      # Fix MySQL service selector to match pod labels
-      echo \"Fixing MySQL service selector...\" &&
-      sudo kubectl patch svc wordpress-mysql -n wordpress --type=json -p=\\\"{\\\\\"op\\\\\": \\\\\"replace\\\\\", \\\\\"path\\\\\": \\\\\"/spec/selector\\\\\", \\\\\"value\\\\\": {\\\\\"app\\\\\": \\\\\"wordpress-mysql\\\\\", \\\\\"tier\\\\\": \\\\\"mysql\\\\\"}}\\\"\"'"
+      timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l tier=mysql -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"MySQL deployment timed out but continuing\"'"
     
-    # Application deployment with correct label selector
+    # Fix MySQL service selector - separate command to avoid quote nesting issues
+    - echo "Fixing MySQL service selector..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl patch svc wordpress-mysql -n wordpress --type=json -p=\"{\\\"op\\\": \\\"replace\\\", \\\"path\\\": \\\"/spec/selector\\\", \\\"value\\\": {\\\"app\\\": \\\"wordpress-mysql\\\", \\\"tier\\\": \\\"mysql\\\"}}\"'"
+    
+    # Application deployment
     - echo "Deploying WordPress application..."
     - |
       ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
