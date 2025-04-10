@@ -8,7 +8,7 @@ NEW_URL="http://$MASTER_IP.nip.io"
 
 echo "Updating WordPress site URL to $NEW_URL..."
 
-# First, get the correct MySQL pod name
+# Proof MySQL pod name
 MYSQL_POD=$(ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get pods -n wordpress | grep mysql | awk '{print \$1}'")
 echo "Found MySQL pod: $MYSQL_POD"
 
@@ -22,3 +22,22 @@ else
 fi
 
 echo "Please clear your browser cache and test the site again."
+echo "Testing database connectivity..."
+ssh -i $SSH_KEY ubuntu@$MASTER_IP "
+  # Wait a bit longer for MySQL to initialize
+  echo 'Waiting for MySQL to initialize...'
+  sleep 30
+  
+  # Test connection from a WordPress pod
+  WORDPRESS_POD=\$(sudo kubectl get pod -l app=wordpress -n wordpress -o jsonpath='{.items[0].metadata.name}')
+  echo 'Testing connection from WordPress pod: '\$WORDPRESS_POD
+  sudo kubectl exec \$WORDPRESS_POD -n wordpress -- bash -c 'mysql -h wordpress-mysql -u wordpress -p\$WORDPRESS_DB_PASSWORD -e \"SHOW DATABASES;\"' || echo 'Database connection failed'
+  
+  # If connection fails, check MySQL logs
+  if [ \$? -ne 0 ]; then
+    MYSQL_POD=\$(sudo kubectl get pod -l tier=mysql -n wordpress -o jsonpath='{.items[0].metadata.name}')
+    echo 'MySQL pod logs:'
+    sudo kubectl logs \$MYSQL_POD -n wordpress
+  fi
+"
+

@@ -6,6 +6,7 @@ metadata:
 spec:
   selector:
     app: wordpress
+    # Remove tier: frontend since your pods don't have this label
   ports:
   - port: 80
     targetPort: 80
