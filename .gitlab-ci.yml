@@ -334,7 +334,7 @@ qa:
     - echo "Running WordPress API tests..."
     - |
       ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && 
-      ./api-tests.sh $MASTER_IP'"
+      ./tests/api-tests.sh $MASTER_IP'"
     
     # Run unit tests inside WordPress pod
     - echo "Running WordPress unit tests..."
@@ -342,7 +342,7 @@ qa:
       ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
       WP_POD=\$(sudo kubectl get pod -l app=wordpress -n wordpress -o jsonpath=\"{.items[0].metadata.name}\")
       echo "Using WordPress pod: \$WP_POD"
-      sudo kubectl cp ~/$REMOTE_DIR/unit-tests.php wordpress/\$WP_POD:/tmp/unit-tests.php
+      sudo kubectl cp ~/$REMOTE_DIR/tests/unit-tests.php wordpress/\$WP_POD:/tmp/unit-tests.php
       sudo kubectl exec \$WP_POD -n wordpress -- php /tmp/unit-tests.php
       '"
     
@@ -390,6 +390,7 @@ qa:
   needs:
     - verify
   allow_failure: true
+
 # Comprehensive cleanup job
 cleanup:
   stage: cleanup
