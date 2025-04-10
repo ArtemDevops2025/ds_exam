@@ -1,4 +1,0 @@
-controller:
-  service:
-    externalIPs:
-      - "13.37.209.198"  # Your master node Elastic IP

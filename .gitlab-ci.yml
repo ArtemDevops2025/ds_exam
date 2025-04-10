@@ -61,12 +61,19 @@ validate:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
 
+
+
 build:
+
   stage: build
   image: alpine:latest
   script:
     - echo "Building WordPress configuration and deployment artifacts..."
-    - apk add --no-cache jq openssl
+    - apk add --no-cache jq openssl bash
+    
+    # Execute the QA test script to create test files
+    - echo "Creating QA test scripts..."
+    - bash /home/a/IT/GroupExam/scripts/qa-tests.sh
     
     # Generate MySQL service patch file
     - mkdir -p $KUBERNETES_DIR/patches
@@ -165,6 +172,13 @@ deploy:
     - echo "Setting up remote environment..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR"
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/*.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR/
+    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/patches/* ubuntu@$MASTER_IP:~/$REMOTE_DIR/ || echo "No patches to copy"
+    
+    # Copy QA test files to remote server
+    - echo "Copying QA test files to remote server..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR/tests"
+    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/tests/* ubuntu@$MASTER_IP:~/$REMOTE_DIR/tests/ || echo "No test files to copy"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "chmod +x ~/$REMOTE_DIR/tests/*.sh || true"
     
     # Fix potential pre-existing issues
     - echo "Preparing Kubernetes cluster..."
@@ -237,6 +251,7 @@ deploy:
     paths:
       - $KUBERNETES_DIR/
     expire_in: 1 week
+
 
 # Verify deployment is working correctly
 verify:
