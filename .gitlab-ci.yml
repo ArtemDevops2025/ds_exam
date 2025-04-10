@@ -119,7 +119,7 @@ deploy:
     
     # Fix MySQL service selector - separate command to avoid quote nesting issues
     - echo "Fixing MySQL service selector..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl patch svc wordpress-mysql -n wordpress --type=json -p=\"{\\\"op\\\": \\\"replace\\\", \\\"path\\\": \\\"/spec/selector\\\", \\\"value\\\": {\\\"app\\\": \\\"wordpress-mysql\\\", \\\"tier\\\": \\\"mysql\\\"}}\"'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl patch svc wordpress-mysql -n wordpress --type=json -p='[{\"op\": \"replace\", \"path\": \"/spec/selector\", \"value\": {\"app\": \"wordpress-mysql\", \"tier\": \"mysql\"}}]'"
     
     # Application deployment
     - echo "Deploying WordPress application..."
