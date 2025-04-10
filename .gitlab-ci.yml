@@ -60,18 +60,89 @@ validate:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
 
-# Build any custom components if needed (placeholder for future use)
 build:
   stage: build
   image: alpine:latest
   script:
-    - echo "No build needed for this project, using standard images"
-    - echo "In future versions, this stage could build custom Docker images"
+    - echo "Building WordPress configuration and deployment artifacts..."
+    - apk add --no-cache jq openssl
+    
+    # Generate MySQL service patch file
+    - mkdir -p $KUBERNETES_DIR/patches
+    - |
+      cat > $KUBERNETES_DIR/patches/mysql-service-patch.json <<EOF
+      [
+        {
+          "op": "replace", 
+          "path": "/spec/selector", 
+          "value": {
+            "app": "wordpress-mysql", 
+            "tier": "mysql"
+          }
+        }
+      ]
+      EOF
+    
+    # Generate wp-config.php with secure random keys
+    - mkdir -p $KUBERNETES_DIR/configmaps
+    - |
+      cat > $KUBERNETES_DIR/configmaps/wp-config.php <<EOF
+      <?php
+      define( 'DB_NAME', 'wordpress' );
+      define( 'DB_USER', 'wordpress' );
+      define( 'DB_PASSWORD', getenv('WORDPRESS_DB_PASSWORD') );
+      define( 'DB_HOST', 'wordpress-mysql' );
+      define( 'DB_CHARSET', 'utf8' );
+      define( 'DB_COLLATE', '' );
+
+      define( 'AUTH_KEY',         '$(openssl rand -hex 16)' );
+      define( 'SECURE_AUTH_KEY',  '$(openssl rand -hex 16)' );
+      define( 'LOGGED_IN_KEY',    '$(openssl rand -hex 16)' );
+      define( 'NONCE_KEY',        '$(openssl rand -hex 16)' );
+      define( 'AUTH_SALT',        '$(openssl rand -hex 16)' );
+      define( 'SECURE_AUTH_SALT', '$(openssl rand -hex 16)' );
+      define( 'LOGGED_IN_SALT',   '$(openssl rand -hex 16)' );
+      define( 'NONCE_SALT',       '$(openssl rand -hex 16)' );
+
+      \$table_prefix = 'wp_';
+
+      define( 'WP_DEBUG', true );
+      define( 'WP_DEBUG_LOG', true );
+      define( 'WP_DEBUG_DISPLAY', false );
+
+      // Dynamic site URL based on request
+      define('WP_HOME', 'http://' . \$_SERVER['HTTP_HOST']);
+      define('WP_SITEURL', 'http://' . \$_SERVER['HTTP_HOST']);
+
+      if ( ! defined( 'ABSPATH' ) ) {
+        define( 'ABSPATH', __DIR__ . '/' );
+      }
+
+      require_once ABSPATH . 'wp-settings.php';
+      EOF
+    
+    # Create ConfigMap YAML for wp-config.php
+    - |
+      cat > $KUBERNETES_DIR/wp-config-map.yaml <<EOF
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: wordpress-config
+        namespace: wordpress
+      data:
+        wp-config.php: |
+      $(sed 's/^/    /' $KUBERNETES_DIR/configmaps/wp-config.php)
+      EOF
+    
+    - echo "Build artifacts successfully created!"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
+  artifacts:
+    paths:
+      - $KUBERNETES_DIR/
+    expire_in: 1 week
 
-# Deploy infrastructure and applications
 deploy:
   stage: deploy
   image: alpine:latest
