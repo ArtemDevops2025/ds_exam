@@ -1,162 +1,158 @@
 #!/bin/bash
-# wordpress-deploy.sh - Automate WordPress deployment to k3s cluster New version!!!!!!!
+# Verify WordPress deployment and monitoring stack are working correctly
 
-MASTER_IP=$(cd terraform && terraform output -raw k3s_master_ip)
+# Set variables with absolute paths
+MASTER_IP=$(cd /home/a/IT/GroupExam/ds_exam_group/terraform && terraform output -raw k3s_master_ip)
 SSH_KEY="ds_exam_key.pem"
-# Use absolute path without tilde
-LOCAL_YAML_DIR="/home/a/IT/GroupExam/ds_exam_group/kubernetes"
-REMOTE_DIR="wordpress"
+TERRAFORM_DIR="/home/a/IT/GroupExam/ds_exam_group/terraform"
 
-echo "Starting WordPress deployment to K3s cluster at $MASTER_IP"
+echo "=== VERIFICATION REPORT ==="
+echo "Master IP: $MASTER_IP"
+echo
 
-# Create remote directory and ensure it's empty
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR && rm -f ~/$REMOTE_DIR/*.yaml"
+# 1. Verify Elastic IPs are correctly assigned
+echo "=== ELASTIC IP VERIFICATION ==="
+cd $TERRAFORM_DIR && terraform output -raw k3s_master_ip
+echo
 
-# Transfer all YAML files
-echo "Transferring Kubernetes manifests to master node..."
-scp -i $SSH_KEY $LOCAL_YAML_DIR/*.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR/
+# 2. Verify Kubernetes components
+echo "=== KUBERNETES COMPONENTS VERIFICATION ==="
+ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get nodes -o wide"
+echo
 
-# Update the ingress host with the current master IP
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "sed -i 's/host: \".*\"/host: \"$MASTER_IP.nip.io\"/' ~/$REMOTE_DIR/wordpress-ingress.yaml"
+# 3. Verify WordPress namespace and resources
+echo "=== WORDPRESS DEPLOYMENT VERIFICATION ==="
+ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get all -n wordpress"
+echo
 
-# Create WordPress config configmap with direct password reference
-echo "Creating WordPress config configmap..."
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "
-# Get the actual password from the secret (create namespace first if it doesn't exist)
-sudo kubectl apply -f ~/$REMOTE_DIR/namespace.yaml
-sudo kubectl apply -f ~/$REMOTE_DIR/s3-secret.yaml
+# 4. Verify Ingress controller
+echo "=== INGRESS CONTROLLER VERIFICATION ==="
+ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get pods -n ingress-nginx"
+ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get svc -n ingress-nginx"
+echo
 
-# Wait for the secret to be available
-echo 'Waiting for mysql-pass secret...'
-if ! sudo kubectl get secret mysql-pass -n wordpress &>/dev/null; then
-  echo 'Creating mysql-pass secret...'
-  echo -n 'wordpress-password' | sudo kubectl create secret generic mysql-pass -n wordpress --from-file=password=/dev/stdin
+# 5. Verify WordPress Ingress with detailed output
+echo "=== WORDPRESS INGRESS VERIFICATION ==="
+ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get ingress -n wordpress -o wide"
+ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl describe ingress wordpress-ingress -n wordpress | grep -A5 'Rules:'"
+echo
+
+# 6. Test WordPress HTTP access
+echo "=== WORDPRESS HTTP ACCESS VERIFICATION ==="
+echo "Testing Load Balancer access..."
+
+# Get the NodePort for the wordpress-lb service
+NODEPORT=$(ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath='{.spec.ports[0].nodePort}'")
+echo "WordPress NodePort: $NODEPORT"
+
+# Test the Load Balancer access using the correct NodePort
+LB_STATUS=$(curl -L -s -o /dev/null -w "%{http_code}" http://$MASTER_IP:$NODEPORT)
+echo "HTTP Status: $LB_STATUS"
+if [[ $LB_STATUS == "200" || $LB_STATUS == "301" || $LB_STATUS == "302" ]]; then
+  echo "✅ Load Balancer access working"
+else
+  echo "❌ Load Balancer access failed"
 fi
 
-# Get the password
-DB_PASSWORD=\$(sudo kubectl get secret mysql-pass -n wordpress -o jsonpath='{.data.password}' | base64 --decode)
+echo "Testing Ingress access..."
+# Test ingress by directly accessing the ingress controller with Host header
+INGRESS_STATUS=$(ssh -i $SSH_KEY ubuntu@$MASTER_IP "curl -L -s -o /dev/null -w \"%{http_code}\" -H \"Host: $MASTER_IP.nip.io\" http://localhost")
+echo "HTTP Status: $INGRESS_STATUS"
+if [[ $INGRESS_STATUS == "200" || $INGRESS_STATUS == "301" || $INGRESS_STATUS == "302" ]]; then
+  echo "✅ Ingress access working"
+else
+  echo "❌ Ingress access failed"
+fi
+echo
 
-# Create a new wp-config.php with the direct password and debugging enabled
-cat > wp-config.php << EOF
-<?php
-define( 'DB_NAME', 'wordpress' );
-define( 'DB_USER', 'wordpress' );
-define( 'DB_PASSWORD', '\$DB_PASSWORD' );
-define( 'DB_HOST', 'wordpress-mysql' );
-define( 'DB_CHARSET', 'utf8' );
-define( 'DB_COLLATE', '' );
+# 7. Verify WordPress is responding with content
+echo "=== WORDPRESS CONTENT VERIFICATION ==="
+echo "Checking WordPress homepage..."
+# Use SSH to run curl on the server itself to avoid DNS issues
+HOMEPAGE=$(ssh -i $SSH_KEY ubuntu@$MASTER_IP "curl -L -s -H \"Host: $MASTER_IP.nip.io\" http://localhost")
+if [[ $HOMEPAGE == *"WordPress"* ]]; then
+  echo "✅ WordPress content detected"
+else
+  echo "❌ WordPress content not detected"
+fi
 
-define( 'AUTH_KEY',         'put your unique phrase here' );
-define( 'SECURE_AUTH_KEY',  'put your unique phrase here' );
-define( 'LOGGED_IN_KEY',    'put your unique phrase here' );
-define( 'NONCE_KEY',        'put your unique phrase here' );
-define( 'AUTH_SALT',        'put your unique phrase here' );
-define( 'SECURE_AUTH_SALT', 'put your unique phrase here' );
-define( 'LOGGED_IN_SALT',   'put your unique phrase here' );
-define( 'NONCE_SALT',       'put your unique phrase here' );
+echo "Checking WordPress admin page..."
+ADMIN_STATUS=$(ssh -i $SSH_KEY ubuntu@$MASTER_IP "curl -L -s -o /dev/null -w \"%{http_code}\" -H \"Host: $MASTER_IP.nip.io\" http://localhost/wp-admin/")
+if [[ $ADMIN_STATUS == "200" || $ADMIN_STATUS == "301" || $ADMIN_STATUS == "302" ]]; then
+  echo "✅ WordPress admin page accessible (Status: $ADMIN_STATUS)"
+else
+  echo "❌ WordPress admin page not accessible (Status: $ADMIN_STATUS)"
+fi
+echo
 
-\\\$table_prefix = 'wp_';
+# 8. Verify Monitoring namespace and resources
+echo "=== MONITORING STACK VERIFICATION ==="
+ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get all -n monitoring"
+echo
 
-define( 'WP_DEBUG', true );
-define( 'WP_DEBUG_LOG', true );
-define( 'WP_DEBUG_DISPLAY', true );
+# 9. Verify Prometheus deployment
+echo "=== PROMETHEUS VERIFICATION ==="
+# Check if Prometheus pods are running
+PROMETHEUS_PODS=$(ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get pods -n monitoring -l app=prometheus -o jsonpath='{.items[*].status.phase}'")
+if [[ $PROMETHEUS_PODS == "Running" ]]; then
+  echo "✅ Prometheus pods are running"
+else
+  echo "❌ Prometheus pods are not running"
+fi
 
-define('WP_HOME', 'http://$MASTER_IP.nip.io');
-define('WP_SITEURL', 'http://$MASTER_IP.nip.io');
+# Test Prometheus HTTP access
+PROMETHEUS_PORT="30909"
+PROMETHEUS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$MASTER_IP:$PROMETHEUS_PORT)
+echo "Prometheus HTTP Status: $PROMETHEUS_STATUS"
+if [[ $PROMETHEUS_STATUS == "200" ]]; then
+  echo "✅ Prometheus UI is accessible"
+else
+  echo "❌ Prometheus UI is not accessible"
+fi
 
-if ( ! defined( 'ABSPATH' ) ) {
-	define( 'ABSPATH', __DIR__ . '/' );
-}
+# Check if Prometheus can scrape targets
+PROMETHEUS_TARGETS=$(ssh -i $SSH_KEY ubuntu@$MASTER_IP "curl -s http://localhost:$PROMETHEUS_PORT/api/v1/targets | grep -c \"up\"")
+if [[ $PROMETHEUS_TARGETS -gt 0 ]]; then
+  echo "✅ Prometheus is scraping targets"
+else
+  echo "❌ Prometheus is not scraping targets"
+fi
+echo
 
-require_once ABSPATH . 'wp-settings.php';
-EOF
+# 10. Verify Grafana deployment
+echo "=== GRAFANA VERIFICATION ==="
+# Check if Grafana pods are running
+GRAFANA_PODS=$(ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get pods -n monitoring -l app=grafana -o jsonpath='{.items[*].status.phase}'")
+if [[ $GRAFANA_PODS == "Running" ]]; then
+  echo "✅ Grafana pods are running"
+else
+  echo "❌ Grafana pods are not running"
+fi
 
-# Delete existing configmap if it exists
-sudo kubectl delete configmap wordpress-config -n wordpress --ignore-not-found
+# Test Grafana HTTP access
+GRAFANA_PORT="30300"
+GRAFANA_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$MASTER_IP:$GRAFANA_PORT)
+echo "Grafana HTTP Status: $GRAFANA_STATUS"
+if [[ $GRAFANA_STATUS == "200" || $GRAFANA_STATUS == "302" ]]; then
+  echo "✅ Grafana UI is accessible"
+else
+  echo "❌ Grafana UI is not accessible"
+fi
 
-# Create new configmap
-sudo kubectl create configmap wordpress-config -n wordpress --from-file=wp-config.php
-rm wp-config.php"
+# Check if Grafana login works (basic check)
+GRAFANA_LOGIN=$(ssh -i $SSH_KEY ubuntu@$MASTER_IP "curl -s -o /dev/null -w \"%{http_code}\" -X POST -H \"Content-Type: application/json\" -d '{\"user\":\"admin\",\"password\":\"admin123\"}' http://localhost:$GRAFANA_PORT/login")
+if [[ $GRAFANA_LOGIN == "200" || $GRAFANA_LOGIN == "302" ]]; then
+  echo "✅ Grafana login is working"
+else
+  echo "❌ Grafana login is not working"
+fi
+echo
 
-# Check if deployments exist and delete them if they do (clean slate approach)
-echo "Checking for existing deployments..."
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "
-  if sudo kubectl get deployment wordpress-mysql -n wordpress &>/dev/null; then
-    echo 'Removing existing MySQL deployment...'
-    sudo kubectl delete deployment wordpress-mysql -n wordpress
-  fi
-  
-  if sudo kubectl get deployment wordpress -n wordpress &>/dev/null; then
-    echo 'Removing existing WordPress deployment...'
-    sudo kubectl delete deployment wordpress -n wordpress
-  fi
-"
-
-# Apply Kubernetes manifests in the correct order
-echo "Applying Kubernetes manifests..."
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && \
-  sudo kubectl apply -f namespace.yaml && \
-  sudo kubectl apply -f s3-secret.yaml && \
-  sudo kubectl apply -f wordpress-pvc.yaml && \
-  sudo kubectl apply -f mysql-deployment.yaml && \
-  sudo kubectl apply -f wordpress-deployment.yaml && \
-  sudo kubectl apply -f wordpress-service.yaml && \
-  sudo kubectl apply -f wordpress-loadbalancer.yaml && \
-  sudo kubectl apply -f wordpress-ingress.yaml"
-
-# Fix MySQL service selector to match pod labels
-echo "Fixing MySQL service selector..."
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "
-  sudo kubectl patch svc wordpress-mysql -n wordpress --type=json -p='[{\"op\": \"replace\", \"path\": \"/spec/selector\", \"value\": {\"app\": \"wordpress-mysql\", \"tier\": \"mysql\"}}]'
-"
-
-# Wait for pods to be ready
-echo "Waiting for pods to be ready..."
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "
-  echo 'Waiting for MySQL...'
-  sudo kubectl wait --for=condition=ready pod -l tier=mysql -n wordpress --timeout=120s || true
-  
-  echo 'Waiting for WordPress...'
-  sudo kubectl wait --for=condition=ready pod -l app=wordpress -n wordpress --timeout=120s || true
-"
-
-# Test database connectivity
-echo "Testing database connectivity..."
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "
-  # Wait a bit longer for MySQL to initialize
-  echo 'Waiting for MySQL to initialize...'
-  sleep 30
-  
-  # Test connection from a WordPress pod
-  WORDPRESS_POD=\$(sudo kubectl get pod -l app=wordpress -n wordpress -o jsonpath='{.items[0].metadata.name}')
-  echo 'Testing connection from WordPress pod: '\$WORDPRESS_POD
-  sudo kubectl exec \$WORDPRESS_POD -n wordpress -- bash -c 'mysql -h wordpress-mysql -u wordpress -p\$WORDPRESS_DB_PASSWORD -e \"SHOW DATABASES;\"' || echo 'Database connection failed'
-  
-  # If connection fails, check MySQL logs
-  if [ \$? -ne 0 ]; then
-    MYSQL_POD=\$(sudo kubectl get pod -l tier=mysql -n wordpress -o jsonpath='{.items[0].metadata.name}')
-    echo 'MySQL pod logs:'
-    sudo kubectl logs \$MYSQL_POD -n wordpress
-  fi
-"
-
-# Check pod logs for errors
-echo "Checking WordPress pod logs for errors..."
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "
-  WORDPRESS_POD=\$(sudo kubectl get pod -l app=wordpress -n wordpress -o jsonpath='{.items[0].metadata.name}')
-  echo 'WordPress pod: '\$WORDPRESS_POD
-  sudo kubectl logs -n wordpress \$WORDPRESS_POD | tail -n 50
-"
-
-# Check deployment status
-echo "Checking deployment status..."
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get all -n wordpress"
-
-# Verify ingress is working
-echo "Verifying ingress deployment..."
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "sudo kubectl get ingress -n wordpress"
-
-#echo "WordPress deployment automation complete!"
+echo "=== VERIFICATION COMPLETE ==="
+echo "If all tests passed, your WordPress deployment and monitoring stack are working correctly!"
 echo "Access your WordPress site at:"
-echo "- Load Balancer: http://$MASTER_IP"
+echo "- Load Balancer: http://$MASTER_IP:$NODEPORT"
 echo "- Ingress: http://$MASTER_IP.nip.io"
+echo "Access monitoring tools at:"
+echo "- Prometheus: http://$MASTER_IP:30909"
+echo "- Grafana: http://$MASTER_IP:30300 (login with admin/admin123)"
