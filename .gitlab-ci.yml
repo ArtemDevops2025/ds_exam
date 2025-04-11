@@ -70,29 +70,31 @@ build:
   script:
     - echo "Building WordPress configuration and deployment artifacts..."
     - apk add --no-cache jq openssl bash
+    
+    # Execute the QA test script to create test files
     - echo "Creating QA test scripts..."
     - bash scripts/qa-tests.sh
     
     # Generate MySQL service patch file
     - mkdir -p $KUBERNETES_DIR/patches
     - |
-      cat > $KUBERNETES_DIR/patches/mysql-service-patch.json <<'EOF'
+      cat <<'MYSQL_PATCH' > $KUBERNETES_DIR/patches/mysql-service-patch.json
       [
         {
-          "op": "replace", 
-          "path": "/spec/selector", 
+          "op": "replace",
+          "path": "/spec/selector",
           "value": {
-            "app": "wordpress-mysql", 
+            "app": "wordpress-mysql",
             "tier": "mysql"
           }
         }
       ]
-      EOF
+      MYSQL_PATCH
     
     # Generate wp-config.php with secure random keys
     - mkdir -p $KUBERNETES_DIR/configmaps
     - |
-      cat > $KUBERNETES_DIR/configmaps/wp-config.php <<'EOF'
+      cat <<'WP_CONFIG' > $KUBERNETES_DIR/configmaps/wp-config.php
       <?php
       define('DB_NAME', 'wordpress');
       define('DB_USER', 'wordpress');
@@ -122,11 +124,11 @@ build:
       }
 
       require_once ABSPATH . 'wp-settings.php';
-      EOF
+      WP_CONFIG
     
     # Create ConfigMap YAML for wp-config.php
     - |
-      cat > $KUBERNETES_DIR/wp-config-map.yaml <<'EOF'
+      cat <<'CONFIGMAP' > $KUBERNETES_DIR/wp-config-map.yaml
       apiVersion: v1
       kind: ConfigMap
       metadata:
@@ -134,8 +136,8 @@ build:
         namespace: wordpress
       data:
         wp-config.php: |
-      $(sed 's/^/          /' $KUBERNETES_DIR/configmaps/wp-config.php)
-      EOF
+          $(sed 's/^/  /' $KUBERNETES_DIR/configmaps/wp-config.php)
+      CONFIGMAP
     
     - echo "Build artifacts successfully created!"
   rules:
