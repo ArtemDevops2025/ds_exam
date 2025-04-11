@@ -211,6 +211,7 @@ deploy:
     name: $CI_COMMIT_BRANCH
     url: http://$MASTER_IP:$WORDPRESS_PORT
 
+
 monitoring:
   stage: monitoring
   image: alpine:latest
@@ -225,17 +226,15 @@ monitoring:
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/monitoring-namespace.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/prometheus/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/prometheus/
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/grafana/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/grafana/
-    
     - |
       ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
       sudo kubectl apply -f ~/$MONITORING_DIR/monitoring-namespace.yaml
       sudo kubectl apply -f ~/$MONITORING_DIR/prometheus/
       sudo kubectl apply -f ~/$MONITORING_DIR/grafana/
-      
+
       timeout 120 bash -c "until sudo kubectl get pods -n monitoring -l app=prometheus -o jsonpath='{.items[0].status.phase}' | grep -q Running; do sleep 5; done" || echo "Prometheus timed out"
       timeout 120 bash -c "until sudo kubectl get pods -n monitoring -l app=grafana -o jsonpath='{.items[0].status.phase}' | grep -q Running; do sleep 5; done" || echo "Grafana timed out"
       ENDSSH
-    
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get all -n monitoring"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
@@ -246,6 +245,7 @@ monitoring:
   environment:
     name: $CI_COMMIT_BRANCH-monitoring
     url: http://$MASTER_IP:30300
+
 
 verify:
   stage: verify
@@ -366,4 +366,4 @@ cleanup:
       when: manual
   environment:
     name: $CI_COMMIT_BRANCH
-    action: stop
+    action: stop   
