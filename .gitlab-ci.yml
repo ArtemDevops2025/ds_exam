@@ -152,74 +152,39 @@ deploy:
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - |
-      if [ -z "$MASTER_IP" ]; then
-        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
-        exit 1
-      fi
     - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
     - echo "Starting deployment at $(date)"
-
   script:
-    # Create directories and transfer files
     - echo "Setting up remote environment..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR"
-    - echo "Copying Kubernetes manifests to remote server..."
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/*.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR/
-    - echo "Verifying files were copied successfully..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "ls -la ~/$REMOTE_DIR/"
-    
-    # Copy patches if they exist
-    - echo "Copying patches to remote server..."
+    - echo "Copying patches if they exist..."
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/patches/* ubuntu@$MASTER_IP:~/$REMOTE_DIR/ || echo "No patches to copy"
-    
-    # Copy QA test files to remote server
-    - echo "Copying QA test files to remote server..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR/tests"
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/tests/* ubuntu@$MASTER_IP:~/$REMOTE_DIR/tests/ || echo "No test files to copy"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "chmod +x ~/$REMOTE_DIR/tests/*.sh || true"
-    
-    # Fix potential pre-existing issues
     - echo "Preparing Kubernetes cluster..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission || true'"
-    
-    # Core deployments - one file at a time with explicit error handling
-    - echo "Deploying core infrastructure..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && echo \"Creating namespace...\" && sudo kubectl apply -f namespace.yaml || { echo \"Failed to apply namespace.yaml\"; exit 1; }'"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && echo \"Applying secrets...\" && sudo kubectl apply -f s3-secret.yaml || { echo \"Failed to apply s3-secret.yaml\"; exit 1; }'"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && echo \"Creating persistent volumes...\" && sudo kubectl apply -f wordpress-pvc.yaml || { echo \"Failed to apply wordpress-pvc.yaml\"; exit 1; }'"
-    
-    # Database deployment
-    - echo "Deploying database..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f mysql-deployment.yaml || { echo \"Failed to apply mysql-deployment.yaml\"; exit 1; }'"
+    - echo "Deploying namespace..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f namespace.yaml'"
+    - echo "Deploying secrets..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f s3-secret.yaml'"
+    - echo "Deploying PVC..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-pvc.yaml'"
+    - echo "Deploying MySQL..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f mysql-deployment.yaml'"
     - echo "Waiting for MySQL to be ready..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l tier=mysql -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"MySQL deployment timed out but continuing\"'"
-    
-    # Fix MySQL service selector - using a patch file approach to avoid quoting issues
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sleep 30'"
     - echo "Fixing MySQL service selector..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l tier=mysql -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done || echo MySQL deployment timed out but continuing\"'"
-
-    
-    # Application deployment
-    - echo "Deploying WordPress application..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-deployment.yaml || { echo \"Failed to apply wordpress-deployment.yaml\"; exit 1; }'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl patch svc wordpress-mysql -n wordpress --type=json -p=\"[{\\\"op\\\": \\\"replace\\\", \\\"path\\\": \\\"/spec/selector\\\", \\\"value\\\": {\\\"app\\\": \\\"wordpress-mysql\\\", \\\"tier\\\": \\\"mysql\\\"}}]\"'"
+    - echo "Deploying WordPress..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-deployment.yaml'"
     - echo "Waiting for WordPress to be ready..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l app=wordpress,tier!=mysql -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"WordPress deployment timed out but continuing\"'"
-    
-    # Network configuration
-    - echo "Configuring network resources..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && echo \"Creating services...\" && sudo kubectl apply -f wordpress-service.yaml || { echo \"Failed to apply wordpress-service.yaml\"; exit 1; }'"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-loadbalancer.yaml || { echo \"Failed to apply wordpress-loadbalancer.yaml\"; exit 1; }'"
-    - echo "Waiting for services to be assigned IPs..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'timeout 60 bash -c \"until sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath=\\\"{.spec.clusterIP}\\\" | grep -q -v none; do sleep 2; done\" || echo \"Service IP assignment timed out but continuing\"'"
-    
-    # Ingress configuration with parameterized host
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sleep 45'"
+    - echo "Deploying services..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-service.yaml'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-loadbalancer.yaml'"
     - echo "Configuring ingress..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && echo \"Updating ingress host with current IP...\" && sed -i \"s/host:.*/host: $MASTER_IP.nip.io/g\" wordpress-ingress.yaml'"
-    - echo "Waiting for ingress controller to be ready..."
-    - sleep 45
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-ingress.yaml || echo \"Ingress creation failed but continuing deployment\"'"
-    
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sed -i \"s/host:.*/host: $MASTER_IP.nip.io/g\" wordpress-ingress.yaml'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-ingress.yaml'"
     - echo "WordPress deployment completed successfully at $(date)!"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
@@ -232,7 +197,6 @@ deploy:
     paths:
       - $KUBERNETES_DIR/
     expire_in: 1 week
-
 
 
 monitoring:
