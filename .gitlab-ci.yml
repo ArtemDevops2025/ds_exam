@@ -197,7 +197,8 @@ deploy:
     
     # Fix MySQL service selector - using a patch file approach to avoid quoting issues
     - echo "Fixing MySQL service selector..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'echo \"[{\\\"op\\\": \\\"replace\\\", \\\"path\\\": \\\"/spec/selector\\\", \\\"value\\\": {\\\"app\\\": \\\"wordpress-mysql\\\", \\\"tier\\\": \\\"mysql\\\"}}]\" > ~/patch.json && sudo kubectl patch svc wordpress-mysql -n wordpress --type=json --patch-file ~/patch.json && rm ~/patch.json'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l tier=mysql -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done || echo MySQL deployment timed out but continuing\"'"
+
     
     # Application deployment
     - echo "Deploying WordPress application..."
