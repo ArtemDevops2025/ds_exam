@@ -35,6 +35,7 @@ lint:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
   allow_failure: true
 
 # Validate Kubernetes manifests
@@ -60,6 +61,7 @@ validate:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
 
 
 
@@ -245,6 +247,7 @@ deploy:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
   environment:
     name: $CI_COMMIT_BRANCH
     url: http://$MASTER_IP:$WORDPRESS_PORT
@@ -345,6 +348,7 @@ verify:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
   needs:
     - deploy
 
@@ -417,6 +421,7 @@ qa:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
   needs:
     - verify
   allow_failure: true
@@ -478,6 +483,7 @@ cleanup:
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
       when: manual
   environment:
     name: $CI_COMMIT_BRANCH
@@ -509,6 +515,7 @@ cleanup:
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
       when: manual
   environment:
     name: $CI_COMMIT_BRANCH
