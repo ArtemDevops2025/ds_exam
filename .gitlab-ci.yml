@@ -3,6 +3,7 @@ stages:
   - validate
   - build
   - deploy
+  - monitoring
   - verify
   - qa
   - cleanup
