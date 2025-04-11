@@ -173,10 +173,15 @@ deploy:
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sudo kubectl apply -f mysql-deployment.yaml"
     - echo "Waiting for MySQL to be ready..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sleep 30"
-    - echo "Fixing MySQL service selector..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "echo '[{\"op\": \"replace\", \"path\": \"/spec/selector\", \"value\": {\"app\": \"wordpress-mysql\", \"tier\": \"mysql\"}}]' > ~/patch.json"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl patch svc wordpress-mysql -n wordpress --type=json --patch-file ~/patch.json"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "rm ~/patch.json"
+      - echo "Fixing MySQL service selector..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "
+        echo '[{\"op\": \"replace\", \"path\": \"/spec/selector\", \"value\": {\"app\": \"wordpress-mysql\", \"tier\": \"mysql\"}}]' > patch.json
+        sudo kubectl patch svc wordpress-mysql -n wordpress --type=json --patch-file patch.json
+        rm patch.json
+      "
+    
+
     - echo "Deploying WordPress..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-deployment.yaml"
     - echo "Waiting for WordPress to be ready..."
