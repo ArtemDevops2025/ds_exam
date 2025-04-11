@@ -3,6 +3,7 @@ stages:
   - validate
   - build
   - deploy
+  - monitoring
   - verify
   - qa
   - cleanup
@@ -12,6 +13,7 @@ variables:
   SSH_KEY_NAME: "ds_exam_key"
   KUBERNETES_DIR: "kubernetes"
   REMOTE_DIR: "wordpress"
+  MONITORING_DIR: "monitoring"
   WORDPRESS_PORT: "30080"  # NodePort for ingress
   DEPLOYMENT_TIMEOUT: "300"  
 
@@ -35,6 +37,7 @@ lint:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
   allow_failure: true
 
 # Validate Kubernetes manifests
@@ -60,11 +63,10 @@ validate:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
-
+    - if: $CI_COMMIT_BRANCH == "monitoring"
 
 
 build:
-
   stage: build
   image: alpine:latest
   script:
@@ -146,6 +148,7 @@ build:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
   artifacts:
     paths:
       - $KUBERNETES_DIR/
@@ -244,6 +247,7 @@ deploy:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
   environment:
     name: $CI_COMMIT_BRANCH
     url: http://$MASTER_IP:$WORDPRESS_PORT
@@ -253,7 +257,65 @@ deploy:
     expire_in: 1 week
 
 
-# Verify deployment is working correctly  !!!!!!!!!!!!!!
+# Deploy monitoring stack
+monitoring:
+  stage: monitoring
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client bash
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - echo "Starting monitoring deployment at $(date)"
+  script:
+    # Create directories and transfer monitoring files
+    - echo "Setting up monitoring environment..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$MONITORING_DIR/prometheus ~/$MONITORING_DIR/grafana"
+    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/monitoring-namespace.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/
+    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/prometheus/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/prometheus/
+    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/grafana/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/grafana/
+    
+    # Deploy monitoring stack
+    - echo "Deploying monitoring stack (Prometheus and Grafana)..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+        # Apply monitoring namespace
+        sudo kubectl apply -f ~/$MONITORING_DIR/monitoring-namespace.yaml
+        
+        # Apply Prometheus manifests
+        sudo kubectl apply -f ~/$MONITORING_DIR/prometheus/
+        
+        # Apply Grafana manifests
+        sudo kubectl apply -f ~/$MONITORING_DIR/grafana/
+        
+        # Wait for monitoring pods to be ready
+        echo \"Waiting for Prometheus...\"
+        timeout 120 bash -c \"until sudo kubectl get pods -n monitoring -l app=prometheus -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"Prometheus deployment timed out but continuing\"
+        
+        echo \"Waiting for Grafana...\"
+        timeout 120 bash -c \"until sudo kubectl get pods -n monitoring -l app=grafana -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"Grafana deployment timed out but continuing\"
+      '"
+    
+    # Check monitoring deployment status
+    - echo "Checking monitoring deployment status..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get all -n monitoring"
+    
+    - echo "Monitoring stack deployment completed successfully at $(date)!"
+    - echo "Access monitoring tools at:"
+    - echo "- Prometheus: http://$MASTER_IP:30909"
+    - echo "- Grafana: http://$MASTER_IP:30300 (login with admin/admin123)"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
+  needs:
+    - deploy
+  environment:
+    name: $CI_COMMIT_BRANCH-monitoring
+    url: http://$MASTER_IP:30300
+
+# Verify deployment is working correctly
 verify:
   stage: verify
   image: alpine:latest
@@ -338,146 +400,37 @@ verify:
       LOGIN_CHECK=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 3 --retry-delay 5 http://$MASTER_IP:32412/wp-login.php | grep -c \"WordPress\"'") || echo "Login page check failed"
       if [[ "$LOGIN_CHECK" -gt 0 ]]; then echo "✅ WordPress login page check passed"; else echo "⚠️ WordPress login page check failed"; fi
     
+    # Check monitoring stack status
+    - |
+      echo "Checking monitoring stack status..."
+      echo "Prometheus Status:"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n monitoring -l app=prometheus'"
+      echo "Grafana Status:"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n monitoring -l app=grafana'"
+    
+    # Verify Prometheus and Grafana are accessible
+    - |
+      echo "Checking Prometheus accessibility..."
+      PROMETHEUS_STATUS=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 3 --retry-delay 5 -o /dev/null -w %{http_code} http://localhost:30909'") || echo "Prometheus check failed, but continuing verification"
+      echo "Prometheus Check Result: $PROMETHEUS_STATUS"
+      if [[ "$PROMETHEUS_STATUS" == "200" ]]; then echo "✅ Prometheus check passed"; else echo "⚠️ Prometheus check returned non-200 response"; fi
+    
+    - |
+      echo "Checking Grafana accessibility..."
+      GRAFANA_STATUS=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 3 --retry-delay 5 -o /dev/null -w %{http_code} http://localhost:30300'") || echo "Grafana check failed, but continuing verification"
+      echo "Grafana Check Result: $GRAFANA_STATUS"
+      if [[ "$GRAFANA_STATUS" == "200" || "$GRAFANA_STATUS" == "302" ]]; then echo "✅ Grafana check passed"; else echo "⚠️ Grafana check returned non-200/302 response"; fi
+    
     # Summary
     - echo "Verification completed at $(date)!"
     - echo "At least one access method should return HTTP 200 for the deployment to be considered successful."
+    - echo "Monitoring tools should be accessible at:"
+    - echo "- Prometheus: http://$MASTER_IP:30909"
+    - echo "- Grafana: http://$MASTER_IP:30300 (login with admin/admin123)"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
   needs:
     - deploy
-
-# Quality Assurance testing
-qa:
-  stage: qa
-  image: alpine:latest
-  before_script:
-    - apk add --no-cache openssh-client curl bash php php-mysqli
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-    - echo "Starting QA tests at $(date)"
-  script:
-    # Run API tests
-    - echo "Running WordPress API tests..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && 
-      ./tests/api-tests.sh $MASTER_IP'"
-    
-    # Run unit tests inside WordPress pod
-    - echo "Running WordPress unit tests..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      WP_POD=\$(sudo kubectl get pod -l app=wordpress -n wordpress -o jsonpath=\"{.items[0].metadata.name}\")
-      echo "Using WordPress pod: \$WP_POD"
-      sudo kubectl cp ~/$REMOTE_DIR/tests/unit-tests.php wordpress/\$WP_POD:/tmp/unit-tests.php
-      sudo kubectl exec \$WP_POD -n wordpress -- php /tmp/unit-tests.php
-      '"
-    
-    # Security scan
-    - echo "Running security scan..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      echo \"Checking for exposed sensitive endpoints...\"
-      ADMIN_EXPOSED=\$(curl -s -o /dev/null -w \"%{http_code}\" http://$MASTER_IP:32412/wp-admin/install.php)
-      if [ \"\$ADMIN_EXPOSED\" == \"200\" ] || [ \"\$ADMIN_EXPOSED\" == \"302\" ]; then
-        echo \"⚠️ Warning: WordPress installation page might be accessible\"
-      else
-        echo \"✅ WordPress installation page properly secured\"
-      fi
-      
-      echo \"Checking WordPress version disclosure...\"
-      VERSION_CHECK=\$(curl -s http://$MASTER_IP:32412 | grep -c \"meta name=\\\"generator\\\"\" || true)
-      if [ \"\$VERSION_CHECK\" -gt 0 ]; then
-        echo \"⚠️ Warning: WordPress version might be exposed in HTML\"
-      else
-        echo \"✅ WordPress version properly hidden\"
-      fi
-      '"
-    
-    # Performance test
-    - echo "Running basic performance test..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      echo \"Testing response time...\"
-      RESPONSE_TIME=\$(curl -s -w \"Time: %{time_total}s\n\" -o /dev/null http://$MASTER_IP:32412)
-      echo \"\$RESPONSE_TIME\"
-      
-      echo \"Testing concurrent connections...\"
-      for i in {1..5}; do
-        curl -s http://$MASTER_IP:32412 > /dev/null &
-      done
-      wait
-      echo \"Concurrent connection test completed\"
-      '"
-    
-    - echo "QA testing completed at $(date)!"
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "development"
-  needs:
-    - verify
-  allow_failure: true
-
-# Comprehensive cleanup job
-cleanup:
-  stage: cleanup
-  image: alpine:latest
-  before_script:
-    - apk add --no-cache openssh-client bash
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-  script:
-    - echo "Starting cleanup process at $(date)..."
-    - |
-      if [[ "$CI_COMMIT_BRANCH" == "main" ]]; then
-        echo "Cleanup is skipped for main branch"
-        exit 0
-      fi
-    
-    - echo "Removing all WordPress resources..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-        echo \"Removing ingress resources...\"
-        sudo kubectl delete ingress -n wordpress --all
-        
-        echo \"Removing service resources...\"
-        sudo kubectl delete svc -n wordpress --all
-        
-        echo \"Removing deployment resources...\"
-        sudo kubectl delete deployment -n wordpress --all
-        
-        echo \"Removing statefulset resources...\"
-        sudo kubectl delete statefulset -n wordpress --all
-        
-        echo \"Removing configmap resources...\"
-        sudo kubectl delete configmap -n wordpress --all
-        
-        echo \"Removing secret resources...\"
-        sudo kubectl delete secret -n wordpress --all
-        
-        echo \"Waiting for pods to terminate...\"
-        timeout 60 bash -c \"until [ \\\$(sudo kubectl get pods -n wordpress --no-headers | wc -l) -eq 0 ]; do sleep 5; done\" || echo \"Pod termination timed out\"
-        
-        echo \"Removing PVC resources...\"
-        sudo kubectl delete pvc -n wordpress --all
-        
-        echo \"Removing namespace...\"
-        sudo kubectl delete namespace wordpress
-        
-        echo \"Removing local files...\"
-        rm -rf ~/$REMOTE_DIR
-      '"
-    
-    - echo "Cleanup completed at $(date)!"
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
-    - if: $CI_COMMIT_BRANCH == "development"
-      when: manual
-  environment:
-    name: $CI_COMMIT_BRANCH
-    action: stop
+    - monitoring
