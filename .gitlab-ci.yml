@@ -15,9 +15,9 @@ variables:
   REMOTE_DIR: "wordpress"
   MONITORING_DIR: "monitoring"
   WORDPRESS_PORT: "30080"  # NodePort for ingress
-  DEPLOYMENT_TIMEOUT: "300"  
+  DEPLOYMENT_TIMEOUT: "300"
 
-# Make sure all files follow best practices
+#if it needed????
 lint:
   stage: lint
   image: alpine:latest
@@ -40,7 +40,6 @@ lint:
     - if: $CI_COMMIT_BRANCH == "monitoring"
   allow_failure: true
 
-# Validate Kubernetes manifests
 validate:
   stage: validate
   image: alpine:latest
@@ -50,9 +49,9 @@ validate:
     - |
       for file in $KUBERNETES_DIR/*.yaml; do
         echo "Checking $file"
-        grep -q "apiVersion:" $file || (echo "Missing apiVersion in $file" && exit 1)
-        grep -q "kind:" $file || (echo "Missing kind in $file" && exit 1)
-        grep -q "metadata:" $file || (echo "Missing metadata in $file" && exit 1)
+        grep -q "apiVersion:" $file || { echo "Missing apiVersion in $file"; exit 1; }
+        grep -q "kind:" $file || { echo "Missing kind in $file"; exit 1; }
+        grep -q "metadata:" $file || { echo "Missing metadata in $file"; exit 1; }
         if grep -q "kind: Deployment" $file; then
           grep -q "replicas:" $file || echo "Warning: No replicas specified in Deployment $file"
           grep -q "resources:" $file || echo "Warning: No resource limits/requests in Deployment $file"
@@ -65,15 +64,12 @@ validate:
     - if: $CI_COMMIT_BRANCH == "development"
     - if: $CI_COMMIT_BRANCH == "monitoring"
 
-
 build:
   stage: build
   image: alpine:latest
   script:
     - echo "Building WordPress configuration and deployment artifacts..."
     - apk add --no-cache jq openssl bash
-    
-    # Execute the QA test script to create test files
     - echo "Creating QA test scripts..."
     - bash scripts/qa-tests.sh
     
@@ -93,45 +89,42 @@ build:
       ]
       EOF
     
-    # Generate wp-config.php with secure random keys
+    # Generate wp-config.php
     - mkdir -p $KUBERNETES_DIR/configmaps
     - |
       cat > $KUBERNETES_DIR/configmaps/wp-config.php <<EOF
       <?php
-      define( 'DB_NAME', 'wordpress' );
-      define( 'DB_USER', 'wordpress' );
-      define( 'DB_PASSWORD', getenv('WORDPRESS_DB_PASSWORD') );
-      define( 'DB_HOST', 'wordpress-mysql' );
-      define( 'DB_CHARSET', 'utf8' );
-      define( 'DB_COLLATE', '' );
+      define('DB_NAME', 'wordpress');
+      define('DB_USER', 'wordpress');
+      define('DB_PASSWORD', getenv('WORDPRESS_DB_PASSWORD'));
+      define('DB_HOST', 'wordpress-mysql');
+      define('DB_CHARSET', 'utf8');
+      define('DB_COLLATE', '');
 
-      define( 'AUTH_KEY',         '$(openssl rand -hex 16)' );
-      define( 'SECURE_AUTH_KEY',  '$(openssl rand -hex 16)' );
-      define( 'LOGGED_IN_KEY',    '$(openssl rand -hex 16)' );
-      define( 'NONCE_KEY',        '$(openssl rand -hex 16)' );
-      define( 'AUTH_SALT',        '$(openssl rand -hex 16)' );
-      define( 'SECURE_AUTH_SALT', '$(openssl rand -hex 16)' );
-      define( 'LOGGED_IN_SALT',   '$(openssl rand -hex 16)' );
-      define( 'NONCE_SALT',       '$(openssl rand -hex 16)' );
+      define('AUTH_KEY',         '$(openssl rand -hex 16)');
+      define('SECURE_AUTH_KEY',  '$(openssl rand -hex 16)');
+      define('LOGGED_IN_KEY',    '$(openssl rand -hex 16)');
+      define('NONCE_KEY',        '$(openssl rand -hex 16)');
+      define('AUTH_SALT',        '$(openssl rand -hex 16)');
+      define('SECURE_AUTH_SALT', '$(openssl rand -hex 16)');
+      define('LOGGED_IN_SALT',   '$(openssl rand -hex 16)');
+      define('NONCE_SALT',       '$(openssl rand -hex 16)');
 
       \$table_prefix = 'wp_';
-
-      define( 'WP_DEBUG', true );
-      define( 'WP_DEBUG_LOG', true );
-      define( 'WP_DEBUG_DISPLAY', false );
-
-      // Dynamic site URL based on request
+      define('WP_DEBUG', true);
+      define('WP_DEBUG_LOG', true);
+      define('WP_DEBUG_DISPLAY', false);
       define('WP_HOME', 'http://' . \$_SERVER['HTTP_HOST']);
       define('WP_SITEURL', 'http://' . \$_SERVER['HTTP_HOST']);
 
-      if ( ! defined( 'ABSPATH' ) ) {
-        define( 'ABSPATH', __DIR__ . '/' );
+      if (!defined('ABSPATH')) {
+        define('ABSPATH', __DIR__ . '/');
       }
 
       require_once ABSPATH . 'wp-settings.php';
       EOF
     
-    # Create ConfigMap YAML for wp-config.php
+    # Create ConfigMap YAML
     - |
       cat > $KUBERNETES_DIR/wp-config-map.yaml <<EOF
       apiVersion: v1
@@ -141,7 +134,7 @@ build:
         namespace: wordpress
       data:
         wp-config.php: |
-      $(sed 's/^/    /' $KUBERNETES_DIR/configmaps/wp-config.php)
+      $(sed 's/^/          /' $KUBERNETES_DIR/configmaps/wp-config.php)
       EOF
     
     - echo "Build artifacts successfully created!"
@@ -160,88 +153,77 @@ deploy:
   before_script:
     - apk add --no-cache openssh-client bash coreutils
     - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - |
-      if [ -z "$MASTER_IP" ]; then
-        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
-        exit 1
-      fi
+    - test -n "$MASTER_IP" || { echo "MASTER_IP is not set"; exit 1; }
     - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
     - echo "Starting deployment at $(date)"
-
   script:
-    # Create directories and transfer files
     - echo "Setting up remote environment..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR"
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/*.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR/
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/patches/* ubuntu@$MASTER_IP:~/$REMOTE_DIR/ || echo "No patches to copy"
-    
-    # Copy QA test files to remote server
-    - echo "Copying QA test files to remote server..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR/tests"
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/tests/* ubuntu@$MASTER_IP:~/$REMOTE_DIR/tests/ || echo "No test files to copy"
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "chmod +x ~/$REMOTE_DIR/tests/*.sh || true"
     
-    # Fix potential pre-existing issues
     - echo "Preparing Kubernetes cluster..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission || true'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission || true"
     
-    # Core deployments
     - echo "Deploying core infrastructure..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
-      echo \"Creating namespace...\" &&
-      sudo kubectl apply -f namespace.yaml &&
-      echo \"Applying secrets...\" &&
-      sudo kubectl apply -f s3-secret.yaml &&
-      echo \"Creating persistent volumes...\" &&
-      sudo kubectl apply -f wordpress-pvc.yaml'"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      cd ~/$REMOTE_DIR
+      echo "Creating namespace..."
+      sudo kubectl apply -f namespace.yaml
+      echo "Applying secrets..."
+      sudo kubectl apply -f s3-secret.yaml
+      echo "Creating persistent volumes..."
+      sudo kubectl apply -f wordpress-pvc.yaml
+      ENDSSH
     
-    # Database deployment
     - echo "Deploying database..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
-      sudo kubectl apply -f mysql-deployment.yaml &&
-      echo \"Waiting for MySQL to be ready...\" &&
-      timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l tier=mysql -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"MySQL deployment timed out but continuing\"'"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      cd ~/$REMOTE_DIR
+      sudo kubectl apply -f mysql-deployment.yaml
+      echo "Waiting for MySQL to be ready..."
+      timeout $DEPLOYMENT_TIMEOUT bash -c "until sudo kubectl get pods -n wordpress -l tier=mysql -o jsonpath='{.items[0].status.phase}' | grep -q Running; do sleep 5; done" || echo "MySQL deployment timed out"
+      ENDSSH
     
-    # Fix MySQL service selector - using a patch file approach to avoid quoting issues
     - echo "Fixing MySQL service selector..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "
-        echo '[{\"op\": \"replace\", \"path\": \"/spec/selector\", \"value\": {\"app\": \"wordpress-mysql\", \"tier\": \"mysql\"}}]' > patch.json
-        sudo kubectl patch svc wordpress-mysql -n wordpress --type=json --patch-file patch.json
-        rm patch.json
-      "
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl patch svc wordpress-mysql -n wordpress --type=json -p='[{\"op\": \"replace\", \"path\": \"/spec/selector\", \"value\": {\"app\": \"wordpress-mysql\", \"tier\": \"mysql\"}}]'"
     
-    # Application deployment
     - echo "Deploying WordPress application..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
-      sudo kubectl apply -f wordpress-deployment.yaml &&
-      echo \"Waiting for WordPress to be ready...\" &&
-      timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress -l app=wordpress,tier!=mysql -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"WordPress deployment timed out but continuing\"'"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      cd ~/$REMOTE_DIR
+      sudo kubectl apply -f wordpress-deployment.yaml
+      echo "Waiting for WordPress to be ready..."
+      timeout $DEPLOYMENT_TIMEOUT bash -c "until sudo kubectl get pods -n wordpress -l app=wordpress,tier!=mysql -o jsonpath='{.items[0].status.phase}' | grep -q Running; do sleep 5; done" || echo "WordPress deployment timed out"
+      ENDSSH
     
-    # Network configuration
     - echo "Configuring network resources..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
-      echo \"Creating services...\" &&
-      sudo kubectl apply -f wordpress-service.yaml &&
-      sudo kubectl apply -f wordpress-loadbalancer.yaml &&
-      echo \"Waiting for services to be assigned IPs...\" &&
-      timeout 60 bash -c \"until sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath=\\\"{.spec.clusterIP}\\\" | grep -q -v none; do sleep 2; done\" || echo \"Service IP assignment timed out but continuing\"'"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      cd ~/$REMOTE_DIR
+      echo "Creating services..."
+      sudo kubectl apply -f wordpress-service.yaml
+      sudo kubectl apply -f wordpress-loadbalancer.yaml
+      echo "Waiting for services to be assigned IPs..."
+      timeout 60 bash -c "until sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath='{.spec.clusterIP}' | grep -q -v none; do sleep 2; done" || echo "Service IP assignment timed out"
+      ENDSSH
     
-    # Ingress configuration with parameterized host
     - echo "Configuring ingress..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR &&
-      echo \"Updating ingress host with current IP...\" &&
-      sed -i \"s/host:.*/host: $MASTER_IP.nip.io/g\" wordpress-ingress.yaml &&
-      echo \"Waiting for ingress controller to be ready...\" &&
-      sleep 45 &&
-      sudo kubectl apply -f wordpress-ingress.yaml || echo \"Ingress creation failed but continuing deployment\"'"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      cd ~/$REMOTE_DIR
+      echo "Updating ingress host with current IP..."
+      sed -i "s/host:.*/host: $MASTER_IP.nip.io/g" wordpress-ingress.yaml
+      echo "Waiting for ingress controller to be ready..."
+      sleep 45
+      sudo kubectl apply -f wordpress-ingress.yaml || echo "Ingress creation failed"
+      ENDSSH
     
     - echo "WordPress deployment completed successfully at $(date)!"
   rules:
@@ -256,51 +238,39 @@ deploy:
       - $KUBERNETES_DIR/
     expire_in: 1 week
 
-
-# Deploy monitoring stack
 monitoring:
   stage: monitoring
   image: alpine:latest
   before_script:
     - apk add --no-cache openssh-client bash
     - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
     - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
     - echo "Starting monitoring deployment at $(date)"
   script:
-    # Create directories and transfer monitoring files
     - echo "Setting up monitoring environment..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$MONITORING_DIR/prometheus ~/$MONITORING_DIR/grafana"
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/monitoring-namespace.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/prometheus/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/prometheus/
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/grafana/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/grafana/
     
-    # Deploy monitoring stack
+    - echo "Deploying monitoring stack..."
     - |
-      echo "Deploying monitoring stack (Prometheus and Grafana)..."
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-        # Apply monitoring namespace
-        sudo kubectl apply -f ~/$MONITORING_DIR/monitoring-namespace.yaml
-        
-        # Apply Prometheus manifests
-        sudo kubectl apply -f ~/$MONITORING_DIR/prometheus/
-        
-        # Apply Grafana manifests
-        sudo kubectl apply -f ~/$MONITORING_DIR/grafana/
-        
-        # Wait for monitoring pods to be ready
-        echo \"Waiting for Prometheus...\"
-        timeout 120 bash -c \"until sudo kubectl get pods -n monitoring -l app=prometheus -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"Prometheus deployment timed out but continuing\"
-        
-        echo \"Waiting for Grafana...\"
-        timeout 120 bash -c \"until sudo kubectl get pods -n monitoring -l app=grafana -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"Grafana deployment timed out but continuing\"
-      '"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      sudo kubectl apply -f ~/$MONITORING_DIR/monitoring-namespace.yaml
+      sudo kubectl apply -f ~/$MONITORING_DIR/prometheus/
+      sudo kubectl apply -f ~/$MONITORING_DIR/grafana/
+      
+      echo "Waiting for Prometheus..."
+      timeout 120 bash -c "until sudo kubectl get pods -n monitoring -l app=prometheus -o jsonpath='{.items[0].status.phase}' | grep -q Running; do sleep 5; done" || echo "Prometheus timed out"
+      
+      echo "Waiting for Grafana..."
+      timeout 120 bash -c "until sudo kubectl get pods -n monitoring -l app=grafana -o jsonpath='{.items[0].status.phase}' | grep -q Running; do sleep 5; done" || echo "Grafana timed out"
+      ENDSSH
     
-    # Check monitoring deployment status
     - echo "Checking monitoring deployment status..."
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get all -n monitoring"
-    
     - echo "Monitoring stack deployment completed successfully at $(date)!"
     - echo "Access monitoring tools at:"
     - echo "- Prometheus: http://$MASTER_IP:30909"
@@ -315,118 +285,58 @@ monitoring:
     name: $CI_COMMIT_BRANCH-monitoring
     url: http://$MASTER_IP:30300
 
-# Verify deployment is working correctly
 verify:
   stage: verify
   image: alpine:latest
   before_script:
     - apk add --no-cache openssh-client curl bash jq
     - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
     - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
     - echo "Starting verification at $(date)"
   script:
-    # Check resources status
-    - |
-      echo "Pod Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n wordpress -o wide'"
-    - |
-      echo "Service Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get svc -n wordpress'"
-    - |
-      echo "Ingress Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress -n wordpress || echo \"No ingress found but continuing verification\"'"
-    - |
-      echo "PVC Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pvc -n wordpress'"
-    
-    - echo "Waiting for services to be fully available..."
+    - echo "Checking resource status..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get pods,svc,ingress,pvc -n wordpress"
+    - echo "Waiting for services to be available..."
     - sleep 45
     
-    # Check application accessibility - ClusterIP
+    - echo "Checking WordPress availability..."
     - |
-      echo "Checking WordPress availability via LoadBalancer cluster IP..."
-      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'export CLUSTER_IP=\$(sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath={.spec.clusterIP}) && curl -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://\${CLUSTER_IP}'") || echo "LoadBalancer check failed, but continuing verification"
-      echo "ClusterIP Check Result: $RESPONSE"
-      if [[ "$RESPONSE" == "200" ]]; then echo "✅ ClusterIP check passed"; else echo "⚠️ ClusterIP check returned non-200 response"; fi
-    
-    # Check application accessibility - NodePort (with redirect following)
-    - |
-      echo "Checking WordPress availability via NodePort..."
-      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://$MASTER_IP:32412'") || echo "NodePort check failed, but continuing verification"
-      echo "NodePort Check Result: $RESPONSE"
-      if [[ "$RESPONSE" == "200" ]]; then echo "✅ NodePort check passed"; else echo "⚠️ NodePort check returned non-200 response"; fi
-    
-    # Check Ingress controller status
-    - |
-      echo "Checking Ingress controller status..."
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n ingress-nginx || echo \"Checking alternative namespace...\" && sudo kubectl get pods -n kube-system -l app.kubernetes.io/name=ingress-nginx || echo \"Ingress controller not found in standard namespaces\"'"
-    
-    # Verify Ingress host configuration
-    - |
-      echo "Verifying Ingress host configuration..."
-      INGRESS_HOST=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress wordpress-ingress -n wordpress -o jsonpath=\"{.spec.rules[0].host}\"'")
-      echo "Configured Ingress host: $INGRESS_HOST"
-    
-    # Wait for Ingress rules to propagate
-    - echo "Waiting for Ingress rules to propagate..."
-    - sleep 60
-    
-    # Try direct access to Ingress without port (matching wordpress-deploy.sh)
-    - |
-      echo "Checking WordPress availability via Ingress (direct access)..."
-      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://$MASTER_IP.nip.io'") || echo "Ingress check failed, but continuing verification"
-      echo "Ingress Check Result (direct access): $RESPONSE"
-      if [[ "$RESPONSE" == "200" ]]; then echo "✅ Ingress check passed"; else echo "⚠️ Ingress check returned non-200 response"; fi
-      
-      if [[ "$RESPONSE" != "200" ]]; then
-        echo "Trying alternative Ingress access methods..."
-        
-        echo "Method 1: Using Host header with direct IP..."
-        RESPONSE2=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://$MASTER_IP'") || echo "Alternative Ingress check failed"
-        echo "Alternative Ingress Check Result (Method 1): $RESPONSE2"
-        if [[ "$RESPONSE2" == "200" ]]; then echo "✅ Alternative Ingress check passed"; fi
-        
-        echo "Method 2: Using NodePort 30080..."
-        RESPONSE3=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://$MASTER_IP:30080'") || echo "Alternative Ingress check failed"
-        echo "Alternative Ingress Check Result (Method 2): $RESPONSE3"
-        if [[ "$RESPONSE3" == "200" ]]; then echo "✅ Alternative Ingress check passed"; fi
-      fi
-    
-    # Enhanced health checks (with redirect following)
-    - |
-      echo "Checking WordPress login page..."
-      LOGIN_CHECK=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 3 --retry-delay 5 http://$MASTER_IP:32412/wp-login.php | grep -c \"WordPress\"'") || echo "Login page check failed"
-      if [[ "$LOGIN_CHECK" -gt 0 ]]; then echo "✅ WordPress login page check passed"; else echo "⚠️ WordPress login page check failed"; fi
-    
-    # Check monitoring stack status
-    - |
-      echo "Checking monitoring stack status..."
-      echo "Prometheus Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n monitoring -l app=prometheus'"
-      echo "Grafana Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n monitoring -l app=grafana'"
-    
-    # Verify Prometheus and Grafana are accessible
-    - |
-      echo "Checking Prometheus accessibility..."
-      PROMETHEUS_STATUS=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 3 --retry-delay 5 -o /dev/null -w %{http_code} http://localhost:30909'") || echo "Prometheus check failed, but continuing verification"
-      echo "Prometheus Check Result: $PROMETHEUS_STATUS"
-      if [[ "$PROMETHEUS_STATUS" == "200" ]]; then echo "✅ Prometheus check passed"; else echo "⚠️ Prometheus check returned non-200 response"; fi
+      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      CLUSTER_IP=$(sudo kubectl get svc wordpress-lb -n wordpress -o jsonpath='{.spec.clusterIP}')
+      curl -s -o /dev/null -w "%{http_code}" http://$CLUSTER_IP
+      ENDSSH
+      )
+      echo "ClusterIP Check: $RESPONSE"
+      [[ "$RESPONSE" == "200" ]] && echo "✅ ClusterIP check passed" || echo "⚠️ ClusterIP check failed"
     
     - |
-      echo "Checking Grafana accessibility..."
-      GRAFANA_STATUS=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -s --retry 3 --retry-delay 5 -o /dev/null -w %{http_code} http://localhost:30300'") || echo "Grafana check failed, but continuing verification"
-      echo "Grafana Check Result: $GRAFANA_STATUS"
-      if [[ "$GRAFANA_STATUS" == "200" || "$GRAFANA_STATUS" == "302" ]]; then echo "✅ Grafana check passed"; else echo "⚠️ Grafana check returned non-200/302 response"; fi
+      NODEPORT_RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      curl -L -s -o /dev/null -w "%{http_code}" http://$MASTER_IP:32412
+      ENDSSH
+      )
+      echo "NodePort Check: $NODEPORT_RESPONSE"
+      [[ "$NODEPORT_RESPONSE" == "200" ]] && echo "✅ NodePort check passed" || echo "⚠️ NodePort check failed"
     
-    # Summary
+    - echo "Checking monitoring tools..."
+    - |
+      PROMETHEUS_STATUS=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      curl -s -o /dev/null -w "%{http_code}" http://localhost:30909
+      ENDSSH
+      )
+      echo "Prometheus Status: $PROMETHEUS_STATUS"
+      [[ "$PROMETHEUS_STATUS" == "200" ]] && echo "✅ Prometheus check passed" || echo "⚠️ Prometheus check failed"
+    
+    - |
+      GRAFANA_STATUS=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      curl -s -o /dev/null -w "%{http_code}" http://localhost:30300
+      ENDSSH
+      )
+      echo "Grafana Status: $GRAFANA_STATUS"
+      [[ "$GRAFANA_STATUS" == "200" || "$GRAFANA_STATUS" == "302" ]] && echo "✅ Grafana check passed" || echo "⚠️ Grafana check failed"
+    
     - echo "Verification completed at $(date)!"
-    - echo "At least one access method should return HTTP 200 for the deployment to be considered successful."
-    - echo "Monitoring tools should be accessible at:"
-    - echo "- Prometheus: http://$MASTER_IP:30909"
-    - echo "- Grafana: http://$MASTER_IP:30300 (login with admin/admin123)"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
@@ -434,70 +344,63 @@ verify:
   needs:
     - deploy
     - monitoring
-# Quality Assurance testing
+
 qa:
   stage: qa
   image: alpine:latest
   before_script:
     - apk add --no-cache openssh-client curl bash php php-mysqli
     - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
     - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
     - echo "Starting QA tests at $(date)"
   script:
-    # Run API tests
     - echo "Running WordPress API tests..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && 
-      ./tests/api-tests.sh $MASTER_IP'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && ./tests/api-tests.sh $MASTER_IP"
     
-    # Run unit tests inside WordPress pod
     - echo "Running WordPress unit tests..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      WP_POD=\$(sudo kubectl get pod -l app=wordpress -n wordpress -o jsonpath=\"{.items[0].metadata.name}\")
-      echo "Using WordPress pod: \$WP_POD"
-      sudo kubectl cp ~/$REMOTE_DIR/tests/unit-tests.php wordpress/\$WP_POD:/tmp/unit-tests.php
-      sudo kubectl exec \$WP_POD -n wordpress -- php /tmp/unit-tests.php
-      '"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      WP_POD=$(sudo kubectl get pod -l app=wordpress -n wordpress -o jsonpath="{.items[0].metadata.name}")
+      echo "Using WordPress pod: $WP_POD"
+      sudo kubectl cp ~/$REMOTE_DIR/tests/unit-tests.php wordpress/$WP_POD:/tmp/unit-tests.php
+      sudo kubectl exec $WP_POD -n wordpress -- php /tmp/unit-tests.php
+      ENDSSH
     
-    # Security scan
     - echo "Running security scan..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      echo \"Checking for exposed sensitive endpoints...\"
-      ADMIN_EXPOSED=\$(curl -s -o /dev/null -w \"%{http_code}\" http://$MASTER_IP:32412/wp-admin/install.php)
-      if [ \"\$ADMIN_EXPOSED\" == \"200\" ] || [ \"\$ADMIN_EXPOSED\" == \"302\" ]; then
-        echo \"⚠️ Warning: WordPress installation page might be accessible\"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      echo "Checking for exposed sensitive endpoints..."
+      ADMIN_EXPOSED=$(curl -s -o /dev/null -w "%{http_code}" http://$MASTER_IP:32412/wp-admin/install.php)
+      if [ "$ADMIN_EXPOSED" == "200" ] || [ "$ADMIN_EXPOSED" == "302" ]; then
+        echo "⚠️ Warning: WordPress installation page might be accessible"
       else
-        echo \"✅ WordPress installation page properly secured\"
+        echo "✅ WordPress installation page properly secured"
       fi
       
-      echo \"Checking WordPress version disclosure...\"
-      VERSION_CHECK=\$(curl -s http://$MASTER_IP:32412 | grep -c \"meta name=\\\"generator\\\"\" || true)
-      if [ \"\$VERSION_CHECK\" -gt 0 ]; then
-        echo \"⚠️ Warning: WordPress version might be exposed in HTML\"
+      echo "Checking WordPress version disclosure..."
+      VERSION_CHECK=$(curl -s http://$MASTER_IP:32412 | grep -c "meta name=\"generator\"" || true)
+      if [ "$VERSION_CHECK" -gt 0 ]; then
+        echo "⚠️ Warning: WordPress version might be exposed in HTML"
       else
-        echo \"✅ WordPress version properly hidden\"
+        echo "✅ WordPress version properly hidden"
       fi
-      '"
+      ENDSSH
     
-    # Performance test
-    - echo "Running basic performance test..."
+    - echo "Running performance test..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      echo \"Testing response time...\"
-      RESPONSE_TIME=\$(curl -s -w \"Time: %{time_total}s\n\" -o /dev/null http://$MASTER_IP:32412)
-      echo \"\$RESPONSE_TIME\"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      echo "Testing response time..."
+      curl -s -w "Time: %{time_total}s\n" -o /dev/null http://$MASTER_IP:32412
       
-      echo \"Testing concurrent connections...\"
+      echo "Testing concurrent connections..."
       for i in {1..5}; do
         curl -s http://$MASTER_IP:32412 > /dev/null &
       done
       wait
-      echo \"Concurrent connection test completed\"
-      '"
+      echo "Concurrent connection test completed"
+      ENDSSH
     
     - echo "QA testing completed at $(date)!"
   rules:
@@ -507,57 +410,42 @@ qa:
     - verify
   allow_failure: true
 
-# Comprehensive cleanup job
 cleanup:
+
   stage: cleanup
   image: alpine:latest
   before_script:
     - apk add --no-cache openssh-client bash
     - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
     - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
   script:
     - echo "Starting cleanup process at $(date)..."
     - |
-      if [[ "$CI_COMMIT_BRANCH" == "main" ]]; then
+      if [ "$CI_COMMIT_BRANCH" == "main" ]; then
         echo "Cleanup is skipped for main branch"
         exit 0
       fi
     
     - echo "Removing all WordPress resources..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-        echo \"Removing ingress resources...\"
-        sudo kubectl delete ingress -n wordpress --all
-        
-        echo \"Removing service resources...\"
-        sudo kubectl delete svc -n wordpress --all
-        
-        echo \"Removing deployment resources...\"
-        sudo kubectl delete deployment -n wordpress --all
-        
-        echo \"Removing statefulset resources...\"
-        sudo kubectl delete statefulset -n wordpress --all
-        
-        echo \"Removing configmap resources...\"
-        sudo kubectl delete configmap -n wordpress --all
-        
-        echo \"Removing secret resources...\"
-        sudo kubectl delete secret -n wordpress --all
-        
-        echo \"Waiting for pods to terminate...\"
-        timeout 60 bash -c \"until [ \\\$(sudo kubectl get pods -n wordpress --no-headers | wc -l) -eq 0 ]; do sleep 5; done\" || echo \"Pod termination timed out\"
-        
-        echo \"Removing PVC resources...\"
-        sudo kubectl delete pvc -n wordpress --all
-        
-        echo \"Removing namespace...\"
-        sudo kubectl delete namespace wordpress
-        
-        echo \"Removing local files...\"
-        rm -rf ~/$REMOTE_DIR
-      '"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
+      echo "Removing Kubernetes resources..."
+      sudo kubectl delete ingress,svc,deployment,statefulset,configmap,secret -n wordpress --all
+      
+      echo "Waiting for pods to terminate..."
+      timeout 60 bash -c "until [ \$(sudo kubectl get pods -n wordpress --no-headers | wc -l) -eq 0 ]; do sleep 5; done" || echo "Pod termination timed out"
+      
+      echo "Removing PVC resources..."
+      sudo kubectl delete pvc -n wordpress --all
+      
+      echo "Removing namespace..."
+      sudo kubectl delete namespace wordpress
+      
+      echo "Removing local files..."
+      rm -rf ~/$REMOTE_DIR
+      ENDSSH
     
     - echo "Cleanup completed at $(date)!"
   rules:
