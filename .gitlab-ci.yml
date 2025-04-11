@@ -162,29 +162,31 @@ deploy:
     - echo "Copying patches if they exist..."
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/patches/* ubuntu@$MASTER_IP:~/$REMOTE_DIR/ || echo "No patches to copy"
     - echo "Preparing Kubernetes cluster..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission || true'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission || true"
     - echo "Deploying namespace..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f namespace.yaml'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sudo kubectl apply -f namespace.yaml"
     - echo "Deploying secrets..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f s3-secret.yaml'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sudo kubectl apply -f s3-secret.yaml"
     - echo "Deploying PVC..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-pvc.yaml'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-pvc.yaml"
     - echo "Deploying MySQL..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f mysql-deployment.yaml'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sudo kubectl apply -f mysql-deployment.yaml"
     - echo "Waiting for MySQL to be ready..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sleep 30'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sleep 30"
     - echo "Fixing MySQL service selector..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl patch svc wordpress-mysql -n wordpress --type=json -p=\"[{\\\"op\\\": \\\"replace\\\", \\\"path\\\": \\\"/spec/selector\\\", \\\"value\\\": {\\\"app\\\": \\\"wordpress-mysql\\\", \\\"tier\\\": \\\"mysql\\\"}}]\"'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "echo '[{\"op\": \"replace\", \"path\": \"/spec/selector\", \"value\": {\"app\": \"wordpress-mysql\", \"tier\": \"mysql\"}}]' > ~/patch.json"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl patch svc wordpress-mysql -n wordpress --type=json --patch-file ~/patch.json"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "rm ~/patch.json"
     - echo "Deploying WordPress..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-deployment.yaml'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-deployment.yaml"
     - echo "Waiting for WordPress to be ready..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sleep 45'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sleep 45"
     - echo "Deploying services..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-service.yaml'"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-loadbalancer.yaml'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-service.yaml"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-loadbalancer.yaml"
     - echo "Configuring ingress..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sed -i \"s/host:.*/host: $MASTER_IP.nip.io/g\" wordpress-ingress.yaml'"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-ingress.yaml'"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sed -i 's/host:.*/host: $MASTER_IP.nip.io/g' wordpress-ingress.yaml"
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "cd ~/$REMOTE_DIR && sudo kubectl apply -f wordpress-ingress.yaml"
     - echo "WordPress deployment completed successfully at $(date)!"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
@@ -197,7 +199,6 @@ deploy:
     paths:
       - $KUBERNETES_DIR/
     expire_in: 1 week
-
 
 monitoring:
   stage: monitoring
