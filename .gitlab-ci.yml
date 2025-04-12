@@ -479,7 +479,15 @@ qa:
     # Run API tests
     - echo "Running WordPress API tests..."
     - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR && 
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+      echo \"Checking if API test script exists...\"
+      ls -la ~/$REMOTE_DIR/tests/
+      echo \"Verifying WordPress deployment...\"
+      sudo kubectl get pods -n wordpress
+      echo \"Checking WordPress service...\"
+      sudo kubectl get svc -n wordpress
+      echo \"Running API tests...\"
+      cd ~/$REMOTE_DIR && 
       ./tests/api-tests.sh $MASTER_IP'"
     
     # Run unit tests inside WordPress pod
