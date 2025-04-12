@@ -1,4 +1,5 @@
 stages:
+  - prepare
   - lint
   - validate
   - build
@@ -15,14 +16,78 @@ variables:
   REMOTE_DIR: "wordpress"
   WORDPRESS_PORT: "30080"  # NodePort for ingress
   DEPLOYMENT_TIMEOUT: "300"  
+  CUSTOM_IMAGE: "${CI_REGISTRY_IMAGE}/k3s-pipeline:latest" 
+
+build-pipeline-image:
+  stage: prepare
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+  script:
+    - |
+      cat > Dockerfile <<EOF
+      FROM alpine:latest
+
+      # Install all required packages
+      RUN apk add --no-cache bash coreutils curl grep jq openssh-client openssl php php-mysqli yamllint
+
+      # Set working directory
+      WORKDIR /app
+
+      # Set default shell to bash
+      SHELL ["/bin/bash", "-c"]
+
+      # Create .ssh directory for later use
+      RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
+
+      # Create SSH setup script
+      RUN echo '#!/bin/bash \\n\\
+      if [ -z "\$SSH_PRIVATE_KEY" ]; then \\n\\
+        echo "SSH_PRIVATE_KEY is not set. Please configure this variable in CI/CD settings." \\n\\
+        exit 1 \\n\\
+      fi \\n\\
+      \\n\\
+      if [ -z "\$MASTER_IP" ]; then \\n\\
+        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings." \\n\\
+        exit 1 \\n\\
+      fi \\n\\
+      \\n\\
+      if [ -z "\$SSH_KEY_NAME" ]; then \\n\\
+        SSH_KEY_NAME="ds_exam_key" \\n\\
+      fi \\n\\
+      \\n\\
+      # SSH configuration \\n\\
+      mkdir -p ~/.ssh \\n\\
+      echo "\$SSH_PRIVATE_KEY" | tr -d "\\\\r" > ~/.ssh/\$SSH_KEY_NAME.pem \\n\\
+      chmod 600 ~/.ssh/\$SSH_KEY_NAME.pem \\n\\
+      echo -e "Host \$MASTER_IP\\\\n\\\\tStrictHostKeyChecking no\\\\n" > ~/.ssh/config \\n\\
+      \\n\\
+      echo "SSH configuration completed successfully"' > /usr/local/bin/ssh-setup.sh
+      RUN chmod +x /usr/local/bin/ssh-setup.sh
+
+      # Set environment variables
+      ENV KUBERNETES_DIR="kubernetes" \\
+          REMOTE_DIR="wordpress" \\
+          WORDPRESS_PORT="30080" \\
+          DEPLOYMENT_TIMEOUT="300"
+      EOF
+    - docker build -t $CUSTOM_IMAGE .
+    - docker push $CUSTOM_IMAGE
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "asm"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "monitoring"
 
 # Make sure all files follow best practices
 lint:
   stage: lint
-  image: alpine:latest
+  image: $CUSTOM_IMAGE
   script:
     - echo "Linting YAML files for best practices..."
-    - apk add --no-cache yamllint
     - |
       cat > .yamllint <<EOF
       extends: default
@@ -34,18 +99,20 @@ lint:
     - yamllint -c .yamllint $KUBERNETES_DIR/*.yaml || echo "Linting found issues, but continuing pipeline"
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "asm"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
     - if: $CI_COMMIT_BRANCH == "monitoring"
   allow_failure: true
+  needs:
+    - build-pipeline-image
 
 # Validate Kubernetes manifests
 validate:
   stage: validate
-  image: alpine:latest
+  image: $CUSTOM_IMAGE
   script:
     - echo "Validating Kubernetes manifests..."
-    - apk add --no-cache grep jq
     - |
       for file in $KUBERNETES_DIR/*.yaml; do
         echo "Checking $file"
@@ -60,27 +127,27 @@ validate:
     - echo "All Kubernetes manifests are valid!"
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "asm"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
     - if: $CI_COMMIT_BRANCH == "monitoring"
+  needs:
+    - build-pipeline-image
 
 
 
 build:
-
   stage: build
-  image: alpine:latest
+  image: $CUSTOM_IMAGE
   script:
     - echo "Building WordPress configuration and deployment artifacts..."
-    - apk add --no-cache jq openssl bash
-    
-    # Execute the QA test script to create test files
-    - echo "Creating QA test scripts..."
-    - bash scripts/qa-tests.sh
-    
-    # Generate MySQL service patch file
-    - mkdir -p $KUBERNETES_DIR/patches
     - |
+      # Execute the QA test script to create test files
+      echo "Creating QA test scripts..."
+      bash scripts/qa-tests.sh
+      
+      # Generate MySQL service patch file
+      mkdir -p $KUBERNETES_DIR/patches
       cat > $KUBERNETES_DIR/patches/mysql-service-patch.json <<EOF
       [
         {
@@ -93,10 +160,9 @@ build:
         }
       ]
       EOF
-    
-    # Generate wp-config.php with secure random keys
-    - mkdir -p $KUBERNETES_DIR/configmaps
-    - |
+      
+      # Generate wp-config.php with secure random keys
+      mkdir -p $KUBERNETES_DIR/configmaps
       cat > $KUBERNETES_DIR/configmaps/wp-config.php <<EOF
       <?php
       define( 'DB_NAME', 'wordpress' );
@@ -131,9 +197,8 @@ build:
 
       require_once ABSPATH . 'wp-settings.php';
       EOF
-    
-    # Create ConfigMap YAML for wp-config.php
-    - |
+      
+      # Create ConfigMap YAML for wp-config.php
       cat > $KUBERNETES_DIR/wp-config-map.yaml <<EOF
       apiVersion: v1
       kind: ConfigMap
@@ -144,9 +209,10 @@ build:
         wp-config.php: |
       $(sed 's/^/    /' $KUBERNETES_DIR/configmaps/wp-config.php)
       EOF
-    
-    - echo "Build artifacts successfully created!"
+      
+      echo "Build artifacts successfully created!"
   rules:
+    - if: $CI_COMMIT_BRANCH == "asm"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
     - if: $CI_COMMIT_BRANCH == "monitoring"
@@ -154,21 +220,14 @@ build:
     paths:
       - $KUBERNETES_DIR/
     expire_in: 1 week
+  needs:
+    - build-pipeline-image
 
 deploy:
   stage: deploy
-  image: alpine:latest
+  image: $CUSTOM_IMAGE
   before_script:
-    - apk add --no-cache openssh-client bash coreutils
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - |
-      if [ -z "$MASTER_IP" ]; then
-        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
-        exit 1
-      fi
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - /usr/local/bin/ssh-setup.sh
     - echo "Starting deployment at $(date)"
 
   script:
@@ -246,6 +305,7 @@ deploy:
     
     - echo "WordPress deployment completed successfully at $(date)!"
   rules:
+    - if: $CI_COMMIT_BRANCH == "asm"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
     - if: $CI_COMMIT_BRANCH == "monitoring"
@@ -256,15 +316,15 @@ deploy:
     paths:
       - $KUBERNETES_DIR/
     expire_in: 1 week
+  needs:
+    - build
+
 monitoring:
   stage: monitoring
-  image: alpine:latest
+  image: $CUSTOM_IMAGE
   before_script:
-    - apk add --no-cache openssh-client bash
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - /usr/local/bin/ssh-setup.sh
+    - echo "Starting monitoring setup at $(date)"
   script:
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$MONITORING_DIR/prometheus ~/$MONITORING_DIR/grafana"
     - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/monitoring-namespace.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/
@@ -282,6 +342,7 @@ monitoring:
       "
     - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get all -n monitoring"
   rules:
+    - if: $CI_COMMIT_BRANCH == "asm"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
     - if: $CI_COMMIT_BRANCH == "monitoring"
@@ -295,13 +356,9 @@ monitoring:
 # Verify deployment is working correctly  !!!!!!!!!!!!!!
 verify:
   stage: verify
-  image: alpine:latest
+  image: $CUSTOM_IMAGE
   before_script:
-    - apk add --no-cache openssh-client curl bash jq
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - /usr/local/bin/ssh-setup.sh
     - echo "Starting verification at $(date)"
   script:
     # Check resources status
@@ -381,6 +438,7 @@ verify:
     - echo "Verification completed at $(date)!"
     - echo "At least one access method should return HTTP 200 for the deployment to be considered successful."
   rules:
+    - if: $CI_COMMIT_BRANCH == "asm"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
     - if: $CI_COMMIT_BRANCH == "monitoring"
@@ -390,13 +448,9 @@ verify:
 # Quality Assurance testing
 qa:
   stage: qa
-  image: alpine:latest
+  image: $CUSTOM_IMAGE
   before_script:
-    - apk add --no-cache openssh-client curl bash php php-mysqli
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - /usr/local/bin/ssh-setup.sh
     - echo "Starting QA tests at $(date)"
   script:
     # Run API tests
@@ -454,6 +508,7 @@ qa:
     
     - echo "QA testing completed at $(date)!"
   rules:
+    - if: $CI_COMMIT_BRANCH == "asm"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "development"
     - if: $CI_COMMIT_BRANCH == "monitoring"
@@ -464,13 +519,9 @@ qa:
 # Comprehensive cleanup job
 cleanup:
   stage: cleanup
-  image: alpine:latest
+  image: $CUSTOM_IMAGE
   before_script:
-    - apk add --no-cache openssh-client bash
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - /usr/local/bin/ssh-setup.sh
   script:
     - echo "Starting cleanup process at $(date)..."
     - |
@@ -518,40 +569,12 @@ cleanup:
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual
     - if: $CI_COMMIT_BRANCH == "development"
+    - if: $CI_COMMIT_BRANCH == "asm"
     - if: $CI_COMMIT_BRANCH == "monitoring"
       when: manual
   environment:
     name: $CI_COMMIT_BRANCH
     action: stop
-
-  stage: cleanup
-  image: alpine:latest
-  before_script:
-    - apk add --no-cache openssh-client bash
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-  script:
-    - |
-      if [ "$CI_COMMIT_BRANCH" == "main" ]; then
-        exit 0
-      fi
-    
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP <<'ENDSSH'
-      sudo kubectl delete ingress,svc,deployment,statefulset,configmap,secret -n wordpress --all
-      timeout 60 bash -c "until [ \$(sudo kubectl get pods -n wordpress --no-headers | wc -l) -eq 0 ]; do sleep 5; done" || true
-      sudo kubectl delete pvc -n wordpress --all
-      sudo kubectl delete namespace wordpress
-      rm -rf ~/$REMOTE_DIR
-      ENDSSH
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
-    - if: $CI_COMMIT_BRANCH == "development"
-    - if: $CI_COMMIT_BRANCH == "monitoring"
-      when: manual
-  environment:
-    name: $CI_COMMIT_BRANCH
-    action: stop   
+  needs:
+    - build-pipeline-image
+  
