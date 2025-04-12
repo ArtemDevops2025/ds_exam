@@ -26,13 +26,53 @@ build-pipeline-image:
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
   script:
-  #######################################
+    # Erstelle das SSH-Setup-Skript
+    - |
+      cat > ssh-setup.sh <<'EOF'
+      #!/bin/bash
+      
+      if [ -z "$SSH_PRIVATE_KEY" ]; then
+        echo "SSH_PRIVATE_KEY is not set. Please configure this variable in CI/CD settings."
+        exit 1
+      fi
+
+      if [ -z "$MASTER_IP" ]; then
+        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
+        exit 1
+      fi
+
+      if [ -z "$SSH_KEY_NAME" ]; then
+        SSH_KEY_NAME="ds_exam_key"
+      fi
+
+      # SSH configuration
+      mkdir -p ~/.ssh
+      echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+      chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+      echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+
+      echo "SSH configuration completed successfully"
+      EOF
+      
+      chmod +x ssh-setup.sh
+    
+    # Erstelle das Dockerfile
     - |
       cat > Dockerfile <<EOF
       FROM alpine:latest
 
       # Install all required packages
-      RUN apk add --no-cache bash coreutils curl grep jq openssh-client openssl php php-mysqli yamllint
+      RUN apk add --no-cache \\
+          bash \\
+          coreutils \\
+          curl \\
+          grep \\
+          jq \\
+          openssh-client \\
+          openssl \\
+          php \\
+          php-mysqli \\
+          yamllint
 
       # Set working directory
       WORKDIR /app
@@ -54,8 +94,8 @@ build-pipeline-image:
           WORDPRESS_PORT="30080" \\
           DEPLOYMENT_TIMEOUT="300"
       EOF
-  
-    #Create Dockerfile with all required packages    
+    
+    # Bauen und Pushen des Docker-Images
     - docker build -t $CUSTOM_IMAGE .
     - docker push $CUSTOM_IMAGE
   rules:
