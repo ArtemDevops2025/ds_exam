@@ -592,7 +592,9 @@ cleanup:
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual
     - if: $CI_COMMIT_BRANCH == "development"
+      when: manual
     - if: $CI_COMMIT_BRANCH == "asm"
+      when: manual
     - if: $CI_COMMIT_BRANCH == "monitoring"
       when: manual
   environment:
