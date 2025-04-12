@@ -476,6 +476,13 @@ qa:
     - /usr/local/bin/ssh-setup.sh
     - echo "Starting QA tests at $(date)"
   script:
+    - echo "Cleaning WordPress pods..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+      echo \"Cleaning up stuck resources...\";
+      sudo kubectl delete pod -n wordpress --field-selector status.phase!=Running;
+      sudo kubectl rollout restart deployment -n wordpress;
+      '"
     # Run API tests
     - echo "Running WordPress API tests..."
     - |
