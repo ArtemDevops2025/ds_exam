@@ -26,6 +26,7 @@ build-pipeline-image:
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
   script:
+  #######################################
     - |
       cat > Dockerfile <<EOF
       FROM alpine:latest
@@ -42,37 +43,19 @@ build-pipeline-image:
       # Create .ssh directory for later use
       RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
 
-      # Create SSH setup script
-      RUN echo '#!/bin/bash \\n\\
-      if [ -z "\$SSH_PRIVATE_KEY" ]; then \\n\\
-        echo "SSH_PRIVATE_KEY is not set. Please configure this variable in CI/CD settings." \\n\\
-        exit 1 \\n\\
-      fi \\n\\
-      \\n\\
-      if [ -z "\$MASTER_IP" ]; then \\n\\
-        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings." \\n\\
-        exit 1 \\n\\
-      fi \\n\\
-      \\n\\
-      if [ -z "\$SSH_KEY_NAME" ]; then \\n\\
-        SSH_KEY_NAME="ds_exam_key" \\n\\
-      fi \\n\\
-      \\n\\
-      # SSH configuration \\n\\
-      mkdir -p ~/.ssh \\n\\
-      echo "\$SSH_PRIVATE_KEY" | tr -d "\\\\r" > ~/.ssh/\$SSH_KEY_NAME.pem \\n\\
-      chmod 600 ~/.ssh/\$SSH_KEY_NAME.pem \\n\\
-      echo -e "Host \$MASTER_IP\\\\n\\\\tStrictHostKeyChecking no\\\\n" > ~/.ssh/config \\n\\
-      \\n\\
-      echo "SSH configuration completed successfully"' > /usr/local/bin/ssh-setup.sh
+      # Copy SSH setup script
+      COPY ssh-setup.sh /usr/local/bin/
       RUN chmod +x /usr/local/bin/ssh-setup.sh
 
       # Set environment variables
       ENV KUBERNETES_DIR="kubernetes" \\
           REMOTE_DIR="wordpress" \\
+          MONITORING_DIR="monitoring" \\
           WORDPRESS_PORT="30080" \\
           DEPLOYMENT_TIMEOUT="300"
       EOF
+  
+    #Create Dockerfile with all required packages    
     - docker build -t $CUSTOM_IMAGE .
     - docker push $CUSTOM_IMAGE
   rules:
