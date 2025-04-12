@@ -18,7 +18,7 @@ echo "Transferring cert-manager manifests to master node..."
 scp -i $SSH_KEY $LOCAL_YAML_DIR/cert-manager/*.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR/cert-manager/
 
 # Update email in letsencrypt-issuer.yaml
-ssh -i $SSH_KEY ubuntu@$MASTER_IP "sed -i 's/your-email@example.com/$EMAIL/' ~/$REMOTE_DIR/cert-manager/letsencrypt-issuer.yaml"
+ssh -i $SSH_KEY ubuntu@$MASTER_IP "sed -i 's/schmakov1@gmail.com/$EMAIL/' ~/$REMOTE_DIR/cert-manager/letsencrypt-issuer.yaml"
 
 # AGGRESSIVE CLEANUP SECTION
 echo "Performing aggressive cleanup of stuck resources..."
