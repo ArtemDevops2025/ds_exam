@@ -5,7 +5,10 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"    
 spec:
+  ingressClassName: nginx
   tls:
   - hosts:
     - 13.37.209.198.nip.io
@@ -18,6 +21,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: wordpress-lb
+            name: wordpress-lb  # Change this from 'wordpress' to 'wordpress-lb'
             port:
               number: 80
