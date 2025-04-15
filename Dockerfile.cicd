@@ -5,7 +5,7 @@ RUN apk add --no-cache openssh-client  bash coreutils  curl jq grep yamllint php
 
 # Set up any environment variables or configurations
 ENV TERRAFORM_VERSION=1.5.7
-
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
 # Install Terraform (if needed with specific version)
 RUN wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip \
     && unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip -d /usr/bin \

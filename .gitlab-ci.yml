@@ -69,6 +69,7 @@ lint:
   stage: lint
   image: $DOCKER_IMAGE
   script:
+    - /bin/sh -c 'echo "Linting YAML files for best practices..."'
     - echo "Linting YAML files for best practices..."
     - |
       cat > .yamllint <<EOF
