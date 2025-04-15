@@ -194,7 +194,7 @@ validate:kubernetes:
 # plan:dev:
 #   stage: plan
 #   image: $PROJECT_IMAGE
-#   <<: *dev_environment
+#   extends: .verify:dev
 #   script:
 #     - cd terraform
 #     - terraform init
@@ -399,7 +399,7 @@ build:
 deploy:terraform:dev:
   stage: deploy
   image: hashicorp/terraform:latest
-  <<: *dev_environment
+  extends: .verify:dev
   script:
     - apk add --no-cache openssh-client bash
     - mkdir -p ~/.ssh
@@ -446,7 +446,7 @@ deploy:terraform:prod:
 deploy:kubernetes:dev:
   stage: deploy
   image: alpine:latest
-  <<: *dev_environment
+  extends: .verify:dev
   needs:
     - deploy:terraform:dev
     - build
@@ -694,8 +694,7 @@ monitoring:
 
 # Verify deployment is working correctly for dev
 verify:dev:
-  extends: .verify
-  <<: *dev_environment
+  extends: .verify:dev
   needs:
     - deploy:kubernetes:dev
 
@@ -705,7 +704,7 @@ verify:dev:
 qa:dev:
   stage: qa
   image: alpine:latest
-  <<: *dev_environment
+  extends: .verify:dev
   needs:
     - verify:dev
   before_script:
@@ -861,7 +860,7 @@ qa:prod:
 cleanup:dev:
   stage: cleanup
   image: alpine:latest
-  <<: *dev_environment
+  extends: .verify:dev
   before_script:
     - apk add --no-cache openssh-client bash
     - mkdir -p ~/.ssh
