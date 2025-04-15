@@ -1,17 +1,7 @@
 FROM alpine:latest
 
 # Install common tools needed across jobs
-RUN apk add --no-cache \
-    openssh-client \
-    bash \
-    coreutils \
-    curl \
-    jq \
-    grep \
-    terraform \
-    yamllint \
-    php \
-    php-mysqli
+RUN apk add --no-cache openssh-client  bash coreutils  curl jq grep terraform yamllint php php-mysqli
 
 # Set up any environment variables or configurations
 ENV TERRAFORM_VERSION=1.5.7
@@ -25,7 +15,7 @@ RUN wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform
 RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
 
 # Add any scripts you frequently use in your CI/CD process
-COPY scripts/setup_ssh.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/setup_ssh.sh
+#COPY scripts/setup_ssh.sh /usr/local/bin/
+#RUN chmod +x /usr/local/bin/setup_ssh.sh
 
 WORKDIR /builds
