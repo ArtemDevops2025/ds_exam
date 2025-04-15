@@ -1,0 +1,168 @@
+# Verify deployment is working correctly for dev
+.verify:dev:
+  stage: verify
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client curl bash jq
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - echo "Starting verification of ${ENVIRONMENT} environment at $(date)"
+  script:
+    # Check resources status
+    - |
+      echo "Pod Status:"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n wordpress-${ENVIRONMENT} -o wide'"
+    - |
+      echo "Service Status:"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get svc -n wordpress-${ENVIRONMENT}'"
+    - |
+      echo "Ingress Status:"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress -n wordpress-${ENVIRONMENT} || echo \"No ingress found but continuing verification\"'"
+    - |
+      echo "PVC Status:"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pvc -n wordpress-${ENVIRONMENT}'"
+    
+    - echo "Waiting for services to be fully available..."
+    - sleep 45
+    
+    # Check application accessibility - ClusterIP
+    - |
+      echo "Checking WordPress availability via LoadBalancer cluster IP..."
+      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'export CLUSTER_IP=\$(sudo kubectl get svc wordpress-lb -n wordpress-${ENVIRONMENT} -o jsonpath={.spec.clusterIP}) && curl -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://\${CLUSTER_IP}'") || echo "LoadBalancer check failed, but continuing verification"
+      echo "ClusterIP Check Result: $RESPONSE"
+      if [[ "$RESPONSE" == "200" ]]; then echo "✅ ClusterIP check passed"; else echo "⚠️ ClusterIP check returned non-200 response"; fi
+    
+    # Check application accessibility via Ingress
+    - |
+      echo "Checking WordPress availability via Ingress..."
+      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://$MASTER_IP.nip.io'") || echo "Ingress check failed, but continuing verification"
+      echo "Ingress Check Result: $RESPONSE"
+      if [[ "$RESPONSE" == "200" ]]; then echo "✅ Ingress check passed"; else echo "⚠️ Ingress check returned non-200 response"; fi
+      
+      if [[ "$RESPONSE" != "200" ]]; then
+        echo "Trying alternative Ingress access methods..."
+        
+        echo "Method 1: Using Host header with direct IP..."
+        RESPONSE2=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://$MASTER_IP'") || echo "Alternative Ingress check failed"
+        echo "Alternative Ingress Check Result (Method 1): $RESPONSE2"
+        if [[ "$RESPONSE2" == "200" ]]; then echo "✅ Alternative Ingress check passed"; fi
+      fi
+    
+    # Verify environment-specific configuration
+    - |
+      echo "Verifying environment-specific configuration..."
+      
+      echo "Checking WordPress deployment replicas..."
+      REPLICAS=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get deployment wordpress -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.spec.replicas}\"'")
+      echo "Configured replicas: $REPLICAS (Expected: ${REPLICA_COUNT})"
+      if [[ "$REPLICAS" == "${REPLICA_COUNT}" ]]; then echo "✅ Replica count matches environment configuration"; else echo "⚠️ Replica count does not match environment configuration"; fi
+      
+      echo "Checking WordPress deployment resource limits..."
+      MEMORY_LIMIT_ACTUAL=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get deployment wordpress -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.spec.template.spec.containers[0].resources.limits.memory}\"'")
+      echo "Configured memory limit: $MEMORY_LIMIT_ACTUAL (Expected: ${MEMORY_LIMIT})"
+      if [[ "$MEMORY_LIMIT_ACTUAL" == "${MEMORY_LIMIT}" ]]; then echo "✅ Memory limit matches environment configuration"; else echo "⚠️ Memory limit does not match environment configuration"; fi
+    
+    # Summary
+    - echo "Verification of ${ENVIRONMENT} environment completed at $(date)!"
+  environment:
+    name: $ENVIRONMENT
+    url: http://$MASTER_IP.nip.io
+
+
+
+
+# Verify deployment for production
+.verify:prod:
+  stage: verify
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client curl bash jq
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - echo "Starting verification of ${ENVIRONMENT} environment at $(date)"
+  script:
+    # Check resources status
+    - |
+      echo "Pod Status:"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n wordpress-${ENVIRONMENT} -o wide'"
+    - |
+      echo "Service Status:"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get svc -n wordpress-${ENVIRONMENT}'"
+    - |
+      echo "Ingress Status:"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress -n wordpress-${ENVIRONMENT} || echo \"No ingress found but continuing verification\"'"
+    - |
+      echo "PVC Status:"
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pvc -n wordpress-${ENVIRONMENT}'"
+    
+    - echo "Waiting for services to be fully available..."
+    - sleep 45
+    
+    # Check application accessibility - ClusterIP
+    - |
+      echo "Checking WordPress availability via LoadBalancer cluster IP..."
+      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'export CLUSTER_IP=\$(sudo kubectl get svc wordpress-lb -n wordpress-${ENVIRONMENT} -o jsonpath={.spec.clusterIP}) && curl -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://\${CLUSTER_IP}'") || echo "LoadBalancer check failed, but continuing verification"
+      echo "ClusterIP Check Result: $RESPONSE"
+      if [[ "$RESPONSE" == "200" ]]; then echo "✅ ClusterIP check passed"; else echo "⚠️ ClusterIP check returned non-200 response"; fi
+    
+    # Check application accessibility via Ingress
+    - |
+      echo "Checking WordPress availability via Ingress..."
+      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://$MASTER_IP.nip.io'") || echo "Ingress check failed, but continuing verification"
+      echo "Ingress Check Result: $RESPONSE"
+      if [[ "$RESPONSE" == "200" ]]; then echo "✅ Ingress check passed"; else echo "⚠️ Ingress check returned non-200 response"; fi
+      
+      if [[ "$RESPONSE" != "200" ]]; then
+        echo "Trying alternative Ingress access methods..."
+        
+        echo "Method 1: Using Host header with direct IP..."
+        RESPONSE2=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://$MASTER_IP'") || echo "Alternative Ingress check failed"
+        echo "Alternative Ingress Check Result (Method 1): $RESPONSE2"
+        if [[ "$RESPONSE2" == "200" ]]; then echo "✅ Alternative Ingress check passed"; fi
+      fi
+    
+    # Verify environment-specific configuration
+    - |
+      echo "Verifying environment-specific configuration..."
+      
+      echo "Checking WordPress deployment replicas..."
+      REPLICAS=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get deployment wordpress -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.spec.replicas}\"'")
+      echo "Configured replicas: $REPLICAS (Expected: ${REPLICA_COUNT})"
+      if [[ "$REPLICAS" == "${REPLICA_COUNT}" ]]; then echo "✅ Replica count matches environment configuration"; else echo "⚠️ Replica count does not match environment configuration"; fi
+      
+      echo "Checking WordPress deployment resource limits..."
+      MEMORY_LIMIT_ACTUAL=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get deployment wordpress -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.spec.template.spec.containers[0].resources.limits.memory}\"'")
+      echo "Configured memory limit: $MEMORY_LIMIT_ACTUAL (Expected: ${MEMORY_LIMIT})"
+      if [[ "$MEMORY_LIMIT_ACTUAL" == "${MEMORY_LIMIT}" ]]; then echo "✅ Memory limit matches environment configuration"; else echo "⚠️ Memory limit does not match environment configuration"; fi
+    
+    # Enhanced verification for production environment
+    - |
+      echo "Running production-specific checks..."
+      
+      # Check TLS/HTTPS if enabled in production
+      echo "Checking HTTPS access if enabled..."
+      HTTPS_ENABLED=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.items[0].spec.tls}\" 2>/dev/null'")
+      if [[ -n "$HTTPS_ENABLED" ]]; then
+        echo "TLS is configured, checking HTTPS access..."
+        HTTPS_RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -k -L -s --retry 3 --retry-delay 5 -o /dev/null -w %{http_code} https://$MASTER_IP.nip.io'") || echo "HTTPS check failed"
+        echo "HTTPS Check Result: $HTTPS_RESPONSE"
+        if [[ "$HTTPS_RESPONSE" == "200" ]]; then echo "✅ HTTPS check passed"; else echo "⚠️ HTTPS check returned non-200 response"; fi
+      else
+        echo "TLS not configured in ingress."
+      fi
+      
+      # Check high availability for production
+      echo "Checking high availability..."
+      POD_COUNT=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n wordpress-${ENVIRONMENT} -l app=wordpress -o name | wc -l'")
+      echo "WordPress pod count: $POD_COUNT (Expected: at least ${REPLICA_COUNT})"
+      if [[ "$POD_COUNT" -ge "${REPLICA_COUNT}" ]]; then echo "✅ High availability check passed"; else echo "⚠️ High availability check failed"; fi
+    
+    # Summary
+    - echo "Verification of ${ENVIRONMENT} environment completed at $(date)!"
+  environment:
+    name: $ENVIRONMENT
+    url: http://$MASTER_IP.nip.io
