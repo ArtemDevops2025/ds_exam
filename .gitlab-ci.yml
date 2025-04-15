@@ -1,5 +1,4 @@
 stages:
-  # - prepare
   - lint
   - validate
   - plan
@@ -150,8 +149,8 @@ lint:
     - if: $CI_COMMIT_BRANCH == "dev"
     # - if: $CI_COMMIT_BRANCH == "monitoring"
   allow_failure: true
-  needs:
-    - build-pipeline-image
+  # needs:
+  #   - build-pipeline-image
 
 
 # Validate Kubernetes manifests templates
@@ -178,8 +177,8 @@ validate:kubernetes:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
     # - if: $CI_COMMIT_BRANCH == "monitoring"
-  needs:
-    - build-pipeline-image
+  # needs:
+  #   - build-pipeline-image
 
 
 # # Terraform Validation for Both Environments
