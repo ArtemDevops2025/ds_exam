@@ -151,6 +151,21 @@ lint:
   # needs:
   #   - build-pipeline-image
 
+# Verify deployment for production
+verify:prod:
+  extends: .verify:prod
+  needs:
+    - deploy:kubernetes:prod
+  script:
+    - echo "Verify deployment for production"
+
+# Verify deployment is working correctly for dev
+verify:dev:
+  extends: .verify:dev
+  needs:
+    - deploy:kubernetes:dev
+  script:
+    - echo "Verify deployment for development"
 
 # Validate Kubernetes manifests templates
 validate:kubernetes:
@@ -398,6 +413,8 @@ build:
     paths:
       - $KUBERNETES_DIR/
     expire_in: 1 week
+
+
 
 # Deploy Terraform infrastructure - Dev
 deploy:terraform:dev:
@@ -650,13 +667,7 @@ deploy:kubernetes:prod:
       - $KUBERNETES_DIR/
     expire_in: 1 week
 
-# Verify deployment for production
-verify:prod:
-  extends: .verify:prod
-  needs:
-    - deploy:kubernetes:prod
-  script:
-    - echo "Verify deployment for production"
+
 
 monitoring:
   stage: monitoring
@@ -697,13 +708,7 @@ monitoring:
     name: $CI_COMMIT_BRANCH-monitoring
     url: http://$MASTER_IP:30300
 
-# Verify deployment is working correctly for dev
-verify:dev:
-  extends: .verify:dev
-  needs:
-    - deploy:kubernetes:dev
-  script:
-    - echo "Verify deployment for development"
+
 
 
 # Quality Assurance testing - Dev
