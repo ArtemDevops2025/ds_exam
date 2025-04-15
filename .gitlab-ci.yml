@@ -64,7 +64,7 @@ build:cicd-image:
     - changes:
         - Dockerfile.cicd
     - if: $CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE == "push" # $CI_COMMIT_BRANCH == "main"
-      when: manual
+#      when: manual
 # Make sure all files follow best practices
 lint:
   stage: lint
