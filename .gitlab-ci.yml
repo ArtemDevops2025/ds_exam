@@ -1,4 +1,5 @@
 stages:
+  - build-image
   - lint
   - validate
   - plan
@@ -12,19 +13,19 @@ stages:
 variables:
   SSH_KEY_NAME: "ds_exam_key"
   KUBERNETES_DIR: "kubernetes"
-  TERRAFORM_DIR: "terraform"
   REMOTE_DIR: "wordpress"
   WORDPRESS_PORT: "30080"  # NodePort for ingress
   DEPLOYMENT_TIMEOUT: "300"
   MONITORING_DIR: "monitoring"
-  PROJECT_IMAGE: "${CI_REGISTRY_IMAGE}/k3s-pipeline:latest" 
+  DOCKER_IMAGE: "${CI_REGISTRY_IMAGE}/cicd-tools:latest"
+
 
 # Environment-specific variables
 .dev_environment: &dev_environment
   variables:
     ENVIRONMENT: "dev"
     TF_VAR_FILE: "environments/dev/terraform.tfvars"
-    REPLICA_COUNT: "1"
+    REPLICA_COUNT: "2"
     MEMORY_REQUEST: "256Mi"
     MEMORY_LIMIT: "512Mi"
     CPU_REQUEST: "200m"
@@ -38,7 +39,7 @@ variables:
   variables:
     ENVIRONMENT: "prod"
     TF_VAR_FILE: "environments/prod/terraform.tfvars"
-    REPLICA_COUNT: "2"
+    REPLICA_COUNT: "3"
     MEMORY_REQUEST: "512Mi"
     MEMORY_LIMIT: "1Gi"
     CPU_REQUEST: "500m"
@@ -47,93 +48,28 @@ variables:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
-# build-pipeline-image:
-#   stage: prepare
-#   image: docker:latest
-#   services:
-#     - docker:dind
-#   before_script:
-#     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
-#   script:
-#     # Erstelle das SSH-Setup-Skript
-#     - |
-#       cat > ssh-setup.sh <<'EOF'
-#       #!/bin/bash
-      
-#       if [ -z "$SSH_PRIVATE_KEY" ]; then
-#         echo "SSH_PRIVATE_KEY is not set. Please configure this variable in CI/CD settings."
-#         exit 1
-#       fi
-
-#       if [ -z "$MASTER_IP" ]; then
-#         echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
-#         exit 1
-#       fi
-
-#       if [ -z "$SSH_KEY_NAME" ]; then
-#         SSH_KEY_NAME="ds_exam_key"
-#       fi
-
-#       # SSH configuration
-#       mkdir -p ~/.ssh
-#       echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-#       chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-#       echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-
-#       echo "SSH configuration completed successfully"
-#       EOF
-      
-#       chmod +x ssh-setup.sh
-    
-#     # Erstelle das Dockerfile
-#     - |
-#       cat > Dockerfile <<EOF
-#       FROM alpine:latest
-
-#       # Install all required packages
-#       RUN apk add --no-cache bash coreutils curl grep jq openssh-client openssl php php-mysqli yamllint terraform 
-
-#       # Set working directory
-#       WORKDIR /app
-
-#       # Set default shell to bash
-#       SHELL ["/bin/bash", "-c"]
-
-#       # Create .ssh directory for later use
-#       RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
-
-#       # Create terraform 
-#       RUN mkdir -p $TERRAFORM_DIR/
-
-#       # Copy SSH setup script
-#       COPY ssh-setup.sh /usr/local/bin/
-#       RUN chmod +x /usr/local/bin/ssh-setup.sh
-
-#       # Set environment variables
-#       ENV KUBERNETES_DIR="kubernetes" \\
-#           REMOTE_DIR="wordpress" \\
-#           MONITORING_DIR="monitoring" \\
-#           WORDPRESS_PORT="30080" \\
-#           DEPLOYMENT_TIMEOUT="300"
-#       EOF
-    
-#     # Bauen und Pushen des Docker-Images
-#     - docker build -t $PROJECT_IMAGE .
-#     - docker push $PROJECT_IMAGE
-#   rules:
-#     # - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-#     # - if: $CI_COMMIT_BRANCH == "asm"
-#     - if: $CI_COMMIT_BRANCH == "main"
-#     - if: $CI_COMMIT_BRANCH == "dev"
-#     # - if: $CI_COMMIT_BRANCH == "monitoring"
-
+build:cicd-image:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    DOCKER_DRIVER: overlay2
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $DOCKER_IMAGE -f Dockerfile.cicd .
+    - docker push $DOCKER_IMAGE
+  rules:
+    - changes:
+        - Dockerfile.cicd
+    - if: $CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE == "push" # $CI_COMMIT_BRANCH == "main"
+      when: manual
 # Make sure all files follow best practices
 lint:
   stage: lint
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   script:
     - echo "Linting YAML files for best practices..."
-    - apk add --no-cache yamllint
     - |
       cat > .yamllint <<EOF
       extends: default
@@ -144,22 +80,18 @@ lint:
       EOF
     - yamllint -c .yamllint $KUBERNETES_DIR/{templates,environments}/*.yaml* || echo "Linting found issues, but continuing pipeline"
   rules:
-    # - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    #- if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
-    # - if: $CI_COMMIT_BRANCH == "monitoring"
+    #- if: $CI_COMMIT_BRANCH == "monitoring"
   allow_failure: true
-  # needs:
-  #   - build-pipeline-image
-
 
 # Validate Kubernetes manifests templates
 validate:kubernetes:
   stage: validate
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   script:
     - echo "Validating Kubernetes manifest templates..."
-    - apk add --no-cache grep jq
     - |
       for file in $KUBERNETES_DIR/templates/*.yaml.tpl; do
         echo "Checking $file"
@@ -177,65 +109,61 @@ validate:kubernetes:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
     # - if: $CI_COMMIT_BRANCH == "monitoring"
-  # needs:
-  #   - build-pipeline-image
 
+# Terraform Validation for Both Environments
+validate:terraform:
+  stage: validate
+  image: $DOCKER_IMAGE
+  script:
+    - cd terraform
+    - terraform init
+    - terraform validate
+  rules:
+  #  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "dev"
+  #  - if: $CI_COMMIT_BRANCH == "monitoring"
 
-# # Terraform Validation for Both Environments
-# validate:terraform:
-#   stage: validate
-#   image: $PROJECT_IMAGE
-#   script:
-#     - cd terraform
-#     - terraform init
-#     - terraform validate
-#   rules:
-#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-#     - if: $CI_COMMIT_BRANCH == "main"
-#     - if: $CI_COMMIT_BRANCH == "dev"
-#     - if: $CI_COMMIT_BRANCH == "monitoring"
+# Terraform Plan - Dev
+plan:dev:
+  stage: plan
+  image: $DOCKER_IMAGE
+  <<: *dev_environment
+  script:
+    - cd terraform
+    - terraform init
+    - terraform workspace select dev 2>/dev/null || terraform workspace new dev
+    - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
+  artifacts:
+    paths:
+      - terraform/tfplan
+    expire_in: 1 day
 
-# # Terraform Plan - Dev
-# plan:dev:
-#   stage: plan
-#   image: $PROJECT_IMAGE
-#   <<: *dev_environment
-#   script:
-#     - cd terraform
-#     - terraform init
-#     - terraform workspace select dev 2>/dev/null || terraform workspace new dev
-#     - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
-#   artifacts:
-#     paths:
-#       - terraform/tfplan
-#     expire_in: 1 day
-
-# # Terraform Plan - Prod
-# plan:prod:
-#   stage: plan
-#   image: hashicorp/terraform:latest
-#   <<: *prod_environment
-#   script:
-#     - cd terraform
-#     - terraform init
-#     - terraform workspace select prod 2>/dev/null || terraform workspace new prod
-#     - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
-#   artifacts:
-#     paths:
-#       - terraform/tfplan
-#     expire_in: 1 day
+# Terraform Plan - Prod
+plan:prod:
+  stage: plan
+  image: $DOCKER_IMAGE
+  <<: *prod_environment
+  script:
+    - cd terraform
+    - terraform init
+    - terraform workspace select prod 2>/dev/null || terraform workspace new prod
+    - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
+  artifacts:
+    paths:
+      - terraform/tfplan
+    expire_in: 1 day
 
 build:
   stage: build
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   script:
     - echo "Building WordPress configuration and deployment artifacts..."
-    - apk add --no-cache jq openssl bash terraform
     
     # Generate K3s manifests for the appropriate environment
     - chmod +x ./generate-k3s-manifests.sh
     - |
-      if [ "$CI_COMMIT_BRANCH" == "dev" ]; then
+      if [ "$CI_COMMIT_BRANCH" == "development" ]; then
         ./generate-k3s-manifests.sh dev
       elif [ "$CI_COMMIT_BRANCH" == "main" ]; then
         ./generate-k3s-manifests.sh prod
@@ -394,7 +322,7 @@ build:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
-    - if: $CI_COMMIT_BRANCH == "monitoring"
+  #  - if: $CI_COMMIT_BRANCH == "monitoring"
   artifacts:
     paths:
       - $KUBERNETES_DIR/
@@ -403,10 +331,9 @@ build:
 # Deploy Terraform infrastructure - Dev
 deploy:terraform:dev:
   stage: deploy
-  image: hashicorp/terraform:latest
+  image: $DOCKER_IMAGE
   <<: *dev_environment
   script:
-    - apk add --no-cache openssh-client bash
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -426,10 +353,9 @@ deploy:terraform:dev:
 # Deploy Terraform infrastructure - Prod
 deploy:terraform:prod:
   stage: deploy
-  image: hashicorp/terraform:latest
+  image: $DOCKER_IMAGE
   <<: *prod_environment
   script:
-    - apk add --no-cache openssh-client bash
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -450,13 +376,12 @@ deploy:terraform:prod:
 # Deploy Kubernetes resources - Dev
 deploy:kubernetes:dev:
   stage: deploy
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   <<: *dev_environment
   needs:
     - deploy:terraform:dev
     - build
   before_script:
-    - apk add --no-cache openssh-client bash coreutils
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -552,13 +477,12 @@ deploy:kubernetes:dev:
 # Deploy Kubernetes resources - Prod
 deploy:kubernetes:prod:
   stage: deploy
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   <<: *prod_environment
   needs:
     - deploy:terraform:prod
     - build
   before_script:
-    - apk add --no-cache openssh-client bash coreutils
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -654,12 +578,11 @@ deploy:kubernetes:prod:
 # Verify deployment for production
 verify:prod:
   stage: verify
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   <<: *prod_environment
   needs:
     - deploy:kubernetes:prod
   before_script:
-    - apk add --no-cache openssh-client curl bash jq
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -750,9 +673,8 @@ verify:prod:
 
 monitoring:
   stage: monitoring
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   before_script:
-    - apk add --no-cache openssh-client bash
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -776,7 +698,7 @@ monitoring:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
-    - if: $CI_COMMIT_BRANCH == "monitoring"
+    #- if: $CI_COMMIT_BRANCH == "monitoring"
   needs:
     - job: deploy:kubernetes:dev
       optional: true
@@ -789,12 +711,11 @@ monitoring:
 # Verify deployment is working correctly for dev
 verify:dev:
   stage: verify
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   <<: *dev_environment
   needs:
     - deploy:kubernetes:dev
   before_script:
-    - apk add --no-cache openssh-client curl bash jq
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -865,12 +786,11 @@ verify:dev:
 
 qa:dev:
   stage: qa
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   <<: *dev_environment
   needs:
     - verify:dev
   before_script:
-    - apk add --no-cache openssh-client curl bash php php-mysqli
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -939,12 +859,11 @@ qa:dev:
 # Quality Assurance testing - Prod
 qa:prod:
   stage: qa
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   <<: *prod_environment
   needs:
     - verify:prod
   before_script:
-    - apk add --no-cache openssh-client curl bash php php-mysqli
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -1021,10 +940,9 @@ qa:prod:
 # Cleanup dev environment
 cleanup:dev:
   stage: cleanup
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   <<: *dev_environment
   before_script:
-    - apk add --no-cache openssh-client bash
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
@@ -1075,10 +993,9 @@ cleanup:dev:
 # Cleanup prod environment
 cleanup:prod:
   stage: cleanup
-  image: alpine:latest
+  image: $DOCKER_IMAGE
   <<: *prod_environment
   before_script:
-    - apk add --no-cache openssh-client bash
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
     - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
