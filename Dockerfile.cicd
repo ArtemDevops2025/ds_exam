@@ -1,8 +1,8 @@
-FROM alpine:latest
+FROM hashicorp/terraform:latest
 
 # Install common tools needed across jobs
-RUN apk add --no-cache openssh-client  bash coreutils  curl jq grep terraform yamllint php php-mysqli unzip
-RUN echo "000000000"
+RUN apk add --no-cache openssh-client  bash coreutils  curl jq grep yamllint php php-mysqli unzip
+
 # Set up any environment variables or configurations
 ENV TERRAFORM_VERSION=1.5.7
 
@@ -10,12 +10,12 @@ ENV TERRAFORM_VERSION=1.5.7
 RUN wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip \
     && unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip -d /usr/bin \
     && rm terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-RUN echo "111111111"
+
 # Create .ssh directory for keys
 RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
-RUN echo "222222"
+
 # Add any scripts you frequently use in your CI/CD process
-#COPY scripts/setup_ssh.sh /usr/local/bin/
-#RUN chmod +x /usr/local/bin/setup_ssh.sh
+COPY scripts/setup_ssh.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/setup_ssh.sh
 
 WORKDIR /builds
