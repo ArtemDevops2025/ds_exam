@@ -1,13 +1,15 @@
+locals {
+  resource_prefix = "${var.project_name}-${var.environment}"
+}
+
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = {
-    Name        = "${var.project_name}-${var.environment}-vpc"
-    Environment = var.environment
-    Project     = var.project_name
-  }
+  tags = merge(var.common_tags, {
+    Name = "${local.resource_prefix}-vpc"
+  })
 }
 
 resource "aws_subnet" "public" {
@@ -17,11 +19,9 @@ resource "aws_subnet" "public" {
   availability_zone       = data.aws_availability_zones.available.names[count.index]
   map_public_ip_on_launch = true
 
-  tags = {
-    Name        = "${var.project_name}-${var.environment}-public-subnet-${count.index + 1}"
-    Environment = var.environment
-    Project     = var.project_name
-  }
+  tags = merge(var.common_tags, {
+    Name = "${local.resource_prefix}-public-subnet-${count.index + 1}"
+  })
 }
 
 resource "aws_subnet" "private" {
@@ -30,21 +30,17 @@ resource "aws_subnet" "private" {
   cidr_block        = var.private_subnet_cidrs[count.index]
   availability_zone = data.aws_availability_zones.available.names[count.index]
 
-  tags = {
-    Name        = "${var.project_name}-${var.environment}-private-subnet-${count.index + 1}"
-    Environment = var.environment
-    Project     = var.project_name
-  }
+  tags = merge(var.common_tags, {
+    Name = "${local.resource_prefix}-private-subnet-${count.index + 1}"
+  })
 }
 
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
-  tags = {
-    Name        = "${var.project_name}-${var.environment}-igw"
-    Environment = var.environment
-    Project     = var.project_name
-  }
+  tags = merge(var.common_tags, {
+    Name = "${local.resource_prefix}-igw"
+  })
 }
 
 resource "aws_route_table" "public" {
@@ -55,11 +51,9 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.main.id
   }
 
-  tags = {
-    Name        = "${var.project_name}-${var.environment}-public-rt"
-    Environment = var.environment
-    Project     = var.project_name
-  }
+  tags = merge(var.common_tags, {
+    Name = "${local.resource_prefix}-public-rt"
+  })
 }
 
 resource "aws_route_table_association" "public" {

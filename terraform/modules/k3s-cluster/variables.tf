@@ -12,13 +12,13 @@ variable "environment" {
 variable "region" {
   description = "AWS region"
   type        = string
-  default     = "eu-west-3"
+  # default     = "eu-west-3"
 }
 
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t3.medium"
+  # default     = "t3.medium"
 }
 
 variable "key_name" {
@@ -42,14 +42,14 @@ variable "node_count" {
   default     = 2
 }
 
-# variable "ssh_key_path" {
-#   description = "Path to SSH key for connecting to instances"
-#   type        = string
-#   default     = "ds_exam_key.pem"
-# }
-
 variable "create_elastic_ips" {
   description = "Whether to create and associate Elastic IPs"
   type        = bool
   default     = true
+}
+
+variable "common_tags" {
+  description = "Common tags for all resources"
+  type        = map(string)
+  default     = {}
 }

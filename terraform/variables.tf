@@ -19,7 +19,7 @@ variable "aws_region" {
 variable "project_name" {
   description = "Project name prefix for resources"
   type        = string
-  default     = "DS_Exam"
+  default     = "ds-exam"
 }
 
 variable "environment" {
@@ -64,7 +64,6 @@ variable "instance_count" {
   default     = 3  # 1 master, 2 workers
 }
 
-#Elastic IP
 variable "create_elastic_ips" {
   description = "Whether to create and associate Elastic IPs"
   type        = bool

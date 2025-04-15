@@ -40,5 +40,18 @@ output "instance_public_ips" {
 
 output "wordpress_url" {
   description = "URL to access WordPress"
-  value       = "http://${module.k3s_cluster.master_public_ip}:80"
+  value       = "http://${module.k3s_cluster.master_public_ip}.nip.io"
+}
+
+output "s3_bucket_name" {
+  value = aws_s3_bucket.app_data.bucket
+}
+
+output "code_storage_bucket_name" {
+  value = aws_s3_bucket.code_storage.bucket
+}
+
+output "environment" {
+  value = var.environment
+  description = "Current environment"
 }
