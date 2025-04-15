@@ -1,7 +1,7 @@
 # Loading variables
 include:
-  - local: 'CI/variables.yml'
-  - local: 'CI/template/environments.yml'
+  - local: './CI/variables.yml'
+  - local: './CI/template/environments.yml'
 
 stages:
   - lint
