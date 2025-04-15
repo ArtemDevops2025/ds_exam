@@ -694,7 +694,7 @@ monitoring:
 
 # Verify deployment is working correctly for dev
 verify:dev:
-  extends: .verify_template
+  extends: .verify
   <<: *dev_environment
   needs:
     - deploy:kubernetes:dev
