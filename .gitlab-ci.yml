@@ -24,7 +24,7 @@ variables:
 .dev_environment: &dev_environment
   variables:
     ENVIRONMENT: "dev"
-    TF_VAR_FILE: "environments/dev/terraform.tfvars"
+    TF_VAR_FILE: "environment/dev/terraform.tfvars"
     REPLICA_COUNT: "2"
     MEMORY_REQUEST: "256Mi"
     MEMORY_LIMIT: "512Mi"
@@ -38,7 +38,7 @@ variables:
 .prod_environment: &prod_environment
   variables:
     ENVIRONMENT: "prod"
-    TF_VAR_FILE: "environments/prod/terraform.tfvars"
+    TF_VAR_FILE: "environment/prod/terraform.tfvars"
     REPLICA_COUNT: "3"
     MEMORY_REQUEST: "512Mi"
     MEMORY_LIMIT: "1Gi"
