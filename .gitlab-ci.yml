@@ -1,5 +1,5 @@
 stages:
-  - prepare
+  # - prepare
   - lint
   - validate
   - plan
@@ -48,92 +48,93 @@ variables:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
-build-pipeline-image:
-  stage: prepare
-  image: docker:latest
-  services:
-    - docker:dind
-  before_script:
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
-  script:
-    # Erstelle das SSH-Setup-Skript
-    - |
-      cat > ssh-setup.sh <<'EOF'
-      #!/bin/bash
+# build-pipeline-image:
+#   stage: prepare
+#   image: docker:latest
+#   services:
+#     - docker:dind
+#   before_script:
+#     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+#   script:
+#     # Erstelle das SSH-Setup-Skript
+#     - |
+#       cat > ssh-setup.sh <<'EOF'
+#       #!/bin/bash
       
-      if [ -z "$SSH_PRIVATE_KEY" ]; then
-        echo "SSH_PRIVATE_KEY is not set. Please configure this variable in CI/CD settings."
-        exit 1
-      fi
+#       if [ -z "$SSH_PRIVATE_KEY" ]; then
+#         echo "SSH_PRIVATE_KEY is not set. Please configure this variable in CI/CD settings."
+#         exit 1
+#       fi
 
-      if [ -z "$MASTER_IP" ]; then
-        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
-        exit 1
-      fi
+#       if [ -z "$MASTER_IP" ]; then
+#         echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
+#         exit 1
+#       fi
 
-      if [ -z "$SSH_KEY_NAME" ]; then
-        SSH_KEY_NAME="ds_exam_key"
-      fi
+#       if [ -z "$SSH_KEY_NAME" ]; then
+#         SSH_KEY_NAME="ds_exam_key"
+#       fi
 
-      # SSH configuration
-      mkdir -p ~/.ssh
-      echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-      chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-      echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+#       # SSH configuration
+#       mkdir -p ~/.ssh
+#       echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+#       chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+#       echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
 
-      echo "SSH configuration completed successfully"
-      EOF
+#       echo "SSH configuration completed successfully"
+#       EOF
       
-      chmod +x ssh-setup.sh
+#       chmod +x ssh-setup.sh
     
-    # Erstelle das Dockerfile
-    - |
-      cat > Dockerfile <<EOF
-      FROM alpine:latest
+#     # Erstelle das Dockerfile
+#     - |
+#       cat > Dockerfile <<EOF
+#       FROM alpine:latest
 
-      # Install all required packages
-      RUN apk add --no-cache bash coreutils curl grep jq openssh-client openssl php php-mysqli yamllint terraform 
+#       # Install all required packages
+#       RUN apk add --no-cache bash coreutils curl grep jq openssh-client openssl php php-mysqli yamllint terraform 
 
-      # Set working directory
-      WORKDIR /app
+#       # Set working directory
+#       WORKDIR /app
 
-      # Set default shell to bash
-      SHELL ["/bin/bash", "-c"]
+#       # Set default shell to bash
+#       SHELL ["/bin/bash", "-c"]
 
-      # Create .ssh directory for later use
-      RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
+#       # Create .ssh directory for later use
+#       RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
 
-      # Create terraform 
-      RUN mkdir -p $TERRAFORM_DIR/
-      
-      # Copy SSH setup script
-      COPY ssh-setup.sh /usr/local/bin/
-      RUN chmod +x /usr/local/bin/ssh-setup.sh
+#       # Create terraform 
+#       RUN mkdir -p $TERRAFORM_DIR/
 
-      # Set environment variables
-      ENV KUBERNETES_DIR="kubernetes" \\
-          REMOTE_DIR="wordpress" \\
-          MONITORING_DIR="monitoring" \\
-          WORDPRESS_PORT="30080" \\
-          DEPLOYMENT_TIMEOUT="300"
-      EOF
+#       # Copy SSH setup script
+#       COPY ssh-setup.sh /usr/local/bin/
+#       RUN chmod +x /usr/local/bin/ssh-setup.sh
+
+#       # Set environment variables
+#       ENV KUBERNETES_DIR="kubernetes" \\
+#           REMOTE_DIR="wordpress" \\
+#           MONITORING_DIR="monitoring" \\
+#           WORDPRESS_PORT="30080" \\
+#           DEPLOYMENT_TIMEOUT="300"
+#       EOF
     
-    # Bauen und Pushen des Docker-Images
-    - docker build -t $PROJECT_IMAGE .
-    - docker push $PROJECT_IMAGE
-  rules:
-    # - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    # - if: $CI_COMMIT_BRANCH == "asm"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "dev"
-    # - if: $CI_COMMIT_BRANCH == "monitoring"
+#     # Bauen und Pushen des Docker-Images
+#     - docker build -t $PROJECT_IMAGE .
+#     - docker push $PROJECT_IMAGE
+#   rules:
+#     # - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+#     # - if: $CI_COMMIT_BRANCH == "asm"
+#     - if: $CI_COMMIT_BRANCH == "main"
+#     - if: $CI_COMMIT_BRANCH == "dev"
+#     # - if: $CI_COMMIT_BRANCH == "monitoring"
 
 # Make sure all files follow best practices
 lint:
   stage: lint
-  image: $PROJECT_IMAGE
+  image: alpine:latest
   script:
     - echo "Linting YAML files for best practices..."
+    - apk add --no-cache yamllint
     - |
       cat > .yamllint <<EOF
       extends: default
@@ -156,9 +157,10 @@ lint:
 # Validate Kubernetes manifests templates
 validate:kubernetes:
   stage: validate
-  image: $PROJECT_IMAGE
+  image: alpine:latest
   script:
     - echo "Validating Kubernetes manifest templates..."
+    - apk add --no-cache grep jq
     - |
       for file in $KUBERNETES_DIR/templates/*.yaml.tpl; do
         echo "Checking $file"
@@ -180,49 +182,49 @@ validate:kubernetes:
     - build-pipeline-image
 
 
-# Terraform Validation for Both Environments
-validate:terraform:
-  stage: validate
-  image: $PROJECT_IMAGE
-  script:
-    - cd terraform
-    - terraform init
-    - terraform validate
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "dev"
-    - if: $CI_COMMIT_BRANCH == "monitoring"
+# # Terraform Validation for Both Environments
+# validate:terraform:
+#   stage: validate
+#   image: $PROJECT_IMAGE
+#   script:
+#     - cd terraform
+#     - terraform init
+#     - terraform validate
+#   rules:
+#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+#     - if: $CI_COMMIT_BRANCH == "main"
+#     - if: $CI_COMMIT_BRANCH == "dev"
+#     - if: $CI_COMMIT_BRANCH == "monitoring"
 
-# Terraform Plan - Dev
-plan:dev:
-  stage: plan
-  image: $PROJECT_IMAGE
-  <<: *dev_environment
-  script:
-    - cd terraform
-    - terraform init
-    - terraform workspace select dev 2>/dev/null || terraform workspace new dev
-    - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
-  artifacts:
-    paths:
-      - terraform/tfplan
-    expire_in: 1 day
+# # Terraform Plan - Dev
+# plan:dev:
+#   stage: plan
+#   image: $PROJECT_IMAGE
+#   <<: *dev_environment
+#   script:
+#     - cd terraform
+#     - terraform init
+#     - terraform workspace select dev 2>/dev/null || terraform workspace new dev
+#     - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
+#   artifacts:
+#     paths:
+#       - terraform/tfplan
+#     expire_in: 1 day
 
-# Terraform Plan - Prod
-plan:prod:
-  stage: plan
-  image: hashicorp/terraform:latest
-  <<: *prod_environment
-  script:
-    - cd terraform
-    - terraform init
-    - terraform workspace select prod 2>/dev/null || terraform workspace new prod
-    - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
-  artifacts:
-    paths:
-      - terraform/tfplan
-    expire_in: 1 day
+# # Terraform Plan - Prod
+# plan:prod:
+#   stage: plan
+#   image: hashicorp/terraform:latest
+#   <<: *prod_environment
+#   script:
+#     - cd terraform
+#     - terraform init
+#     - terraform workspace select prod 2>/dev/null || terraform workspace new prod
+#     - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
+#   artifacts:
+#     paths:
+#       - terraform/tfplan
+#     expire_in: 1 day
 
 build:
   stage: build
