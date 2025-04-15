@@ -652,7 +652,6 @@ deploy:kubernetes:prod:
 
 # Verify deployment for production
 verify:prod:
-  extends: .verfiy_template
   extends: .verify:prod
   needs:
     - deploy:kubernetes:prod
