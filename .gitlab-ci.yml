@@ -1,11 +1,11 @@
 # Loading CI-Files
 include:
   - local: 'ci/variables.yml'
-  - local: 'ci/template/environments.yml'
-  - local: 'ci/jobs/deploy-kubernetes.yml'
   - local: 'ci/jobs/verify.yml'
-  - local: 'ci/jobs/qa.yml'
-  - local: 'ci/jobs/cleanup.yml'
+  # - local: 'ci/template/environments.yml'
+  # - local: 'ci/jobs/deploy-kubernetes.yml'
+  # - local: 'ci/jobs/qa.yml'
+  # - local: 'ci/jobs/cleanup.yml'
 
 stages:
   - lint
