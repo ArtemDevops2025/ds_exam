@@ -74,7 +74,7 @@ build:cicd-image:
     - docker:dind
   variables:
     DOCKER_DRIVER: overlay2
-  extends: 'ci/scripts/build-image/build_cicd_image.yml'
+  include: 'ci/scripts/build-image/build_cicd_image.yml'
   rules:
     - changes:
         - Dockerfile.cicd
