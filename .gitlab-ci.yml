@@ -75,7 +75,7 @@ build:cicd-image:
   variables:
     DOCKER_DRIVER: overlay2
   #include: 'ci/scripts/build-image/build_cicd_image.yml'
-  extends: .deploy_kubernetes_dev_script_template
+  extends: .build_cicd_image_script_template
   rules:
     - changes:
         - Dockerfile.cicd
