@@ -1,4 +1,4 @@
-..qa_prod_script:  
+.qa_prod_script:  
   before_script:
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
