@@ -1,3 +1,23 @@
+include:
+  - local: 'ci/scripts/build-image/build_cicd_image.yml'
+  - local: 'ci/scripts/lint/lint.yml'
+  - local: 'ci/scripts/validate/validate_kubernetes.yml'
+  - local: 'ci/scripts/validate/validate_terraform.yml'
+  - local: 'ci/scripts/plan/plan_dev.yml'
+  - local: 'ci/scripts/plan/plan_prod.yml'
+  - local: 'ci/scripts/build/build.yml'
+  - local: 'ci/scripts/deploy/deploy_terraform_dev.yml'
+  - local: 'ci/scripts/deploy/deploy_terraform_prod.yml'
+  - local: 'ci/scripts/deploy/deploy_kubernetes_dev.yml'
+  - local: 'ci/scripts/deploy/deploy_kubernetes_prod.yml'
+  - local: 'ci/scripts/verify/verify_prod.yml'
+  - local: 'ci/scripts/monitoring/monitoring.yml'
+  - local: 'ci/scripts/verify/verify_dev.yml'
+  - local: 'ci/scripts/qa/qa_dev.yml'
+  - local: 'ci/scripts/qa/qa_prod.yml'
+  - local: 'ci/scripts/cleanup/cleanup_dev.yml'
+  - local: 'ci/scripts/cleanup/cleanup_prod.yml'
+
 stages:
   - build-image
   - lint
@@ -54,7 +74,7 @@ build:cicd-image:
     - docker:dind
   variables:
     DOCKER_DRIVER: overlay2
-  include: 'ci/scripts/build-image/build_cicd_image.yml'
+  extends: 'ci/scripts/build-image/build_cicd_image.yml'
   rules:
     - changes:
         - Dockerfile.cicd

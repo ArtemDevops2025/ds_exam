@@ -1,4 +1,5 @@
-script:
-  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-  - docker build -t $DOCKER_IMAGE -f Dockerfile.cicd .
-  - docker push $DOCKER_IMAGE
+.build_cicd_image_script_template:
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $DOCKER_IMAGE -f Dockerfile.cicd .
+    - docker push $DOCKER_IMAGE
