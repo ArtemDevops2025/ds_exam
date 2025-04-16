@@ -74,7 +74,7 @@ build:cicd-image:
     - docker:dind
   variables:
     DOCKER_DRIVER: overlay2
-  include: 'ci/scripts/build-image/build_cicd_image.yml'
+  extends: .deploy_kubernetes_dev_script_template
   rules:
     - changes:
         - Dockerfile.cicd
@@ -178,7 +178,7 @@ deploy:kubernetes:dev:
   needs:
     - deploy:terraform:dev
     - build
-  include: 'ci/scripts/deploy/deploy_kubernetes_dev.yml'
+  extends: .deploy_kubernetes_dev_script_template
   environment:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
