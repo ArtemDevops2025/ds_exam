@@ -1,5 +1,6 @@
-script:
-  - cd terraform
-  - terraform init
-  - terraform workspace select prod 2>/dev/null || terraform workspace new prod
-  - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
+.plan_script_prod:
+  script:
+    - cd terraform
+    - terraform init
+    - terraform workspace select prod 2>/dev/null || terraform workspace new prod
+    - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan

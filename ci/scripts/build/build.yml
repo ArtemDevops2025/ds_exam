@@ -1,4 +1,5 @@
-script:
+.build_script:
+  script:
   - echo "Building WordPress configuration and deployment artifacts..."
   
   # Generate K3s manifests for the appropriate environment

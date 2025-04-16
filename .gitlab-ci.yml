@@ -86,6 +86,7 @@ lint:
   stage: lint
   image: $DOCKER_IMAGE
   include: 'ci/scripts/lint/lint.yml'
+  extends: .lint_script_template
   rules:
     #- if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
@@ -97,7 +98,8 @@ lint:
 validate:kubernetes:
   stage: validate
   image: $DOCKER_IMAGE
-  include: 'ci/scripts/validate/validate_kubernetes.yml'
+  #include: 'ci/scripts/validate/validate_kubernetes.yml'
+  extends: .validate_script_kubernetes
   rules:
     # - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
@@ -107,7 +109,8 @@ validate:kubernetes:
 validate:terraform:
   stage: validate
   image: $DOCKER_IMAGE
-  include: 'ci/scripts/validate/validate_terraform.yml'
+  #include: 'ci/scripts/validate/validate_terraform.yml'
+  extends: .validate_script_terraform
   rules:
   #  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
@@ -118,7 +121,8 @@ plan:dev:
   stage: plan
   image: $DOCKER_IMAGE
   <<: *dev_environment
-  include: 'ci/scripts/plan/plan_dev.yml'
+  #include: 'ci/scripts/plan/plan_dev.yml'
+  extends: .plan_script_dev
   artifacts:
     paths:
       - terraform/tfplan
@@ -128,7 +132,8 @@ plan:prod:
   stage: plan
   image: $DOCKER_IMAGE
   <<: *prod_environment
-  include: 'ci/scripts/plan/plan_prod.yml'
+  #include: 'ci/scripts/plan/plan_prod.yml'
+  extends: .plan_script_prod
   artifacts:
     paths:
       - terraform/tfplan
@@ -137,7 +142,8 @@ plan:prod:
 build:
   stage: build
   image: $DOCKER_IMAGE
-  include: 'ci/scripts/build/build.yml'
+  #include: 'ci/scripts/build/build.yml'
+  extends: .build_script
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
@@ -151,7 +157,8 @@ deploy:terraform:dev:
   stage: deploy
   image: $DOCKER_IMAGE
   <<: *dev_environment
-  include: 'ci/scripts/deploy/deploy_terraform_dev.yml'
+  #include: 'ci/scripts/deploy/deploy_terraform_dev.yml'
+  extends: .deploy_terraform_dev_template
   artifacts:
     reports:
       dotenv: terraform/terraform.env
@@ -163,7 +170,8 @@ deploy:terraform:prod:
   stage: deploy
   image: $DOCKER_IMAGE
   <<: *prod_environment
-  include: 'ci/scripts/deploy/deploy_terraform_prod.yml'
+  #include: 'ci/scripts/deploy/deploy_terraform_prod.yml'
+  extends: .deploy_terraform_prod_template
   artifacts:
     reports:
       dotenv: terraform/terraform.env
@@ -179,7 +187,8 @@ deploy:kubernetes:dev:
   needs:
     - deploy:terraform:dev
     - build
-  include: 'ci/scripts/deploy/deploy_kubernetes_prod.yml'
+  #include: 'ci/scripts/deploy/deploy_kubernetes_prod.yml'
+  extends: .deploy_kubernenets_dev_template
   environment:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
@@ -195,7 +204,8 @@ deploy:kubernetes:prod:
   needs:
     - deploy:terraform:prod
     - build
-  include: 'ci/scripts/deploy/deploy_kubernetes_prod.yml'
+  #include: 'ci/scripts/deploy/deploy_kubernetes_prod.yml'
+  extends: .deploy_kubernenets_prod_template
   environment:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
@@ -207,7 +217,8 @@ deploy:kubernetes:prod:
 monitoring:
   stage: monitoring
   image: $DOCKER_IMAGE
-  include: 'ci/scripts/monitoring/monitoring.yml'
+  #include: 'ci/scripts/monitoring/monitoring.yml'
+  extends: .monitoring_template
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
@@ -227,7 +238,8 @@ verify:prod:
   <<: *prod_environment
   needs:
     - deploy:kubernetes:prod
-  include: 'ci/scripts/verify/verify_prod.yml'
+  #include: 'ci/scripts/verify/verify_prod.yml'
+  extends: .verify_prod_script
   environment:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
@@ -238,7 +250,8 @@ verify:dev:
   <<: *dev_environment
   needs:
     - deploy:kubernetes:dev
-  include: 'ci/scripts/verify/verify_dev.yml'
+  #include: 'ci/scripts/verify/verify_dev.yml'
+  extends:  .verify_dev_script
   environment:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
@@ -249,7 +262,8 @@ qa:dev:
   <<: *dev_environment
   needs:
     - verify:dev
-  include: 'ci/scripts/qa/qa_dev.yml'
+  #include: 'ci/scripts/qa/qa_dev.yml'
+  extends: .qa_dev_script
   environment:
     name: $ENVIRONMENT-qa
     url: http://$MASTER_IP.nip.io
@@ -261,7 +275,8 @@ qa:prod:
   <<: *prod_environment
   needs:
     - verify:prod
-  include: 'ci/scripts/qa/qa_prod.yml'
+  #include: 'ci/scripts/qa/qa_prod.yml'
+  extends: .qa_prod_script
   environment:
     name: $ENVIRONMENT-qa
     url: http://$MASTER_IP.nip.io
@@ -271,7 +286,8 @@ cleanup:dev:
   stage: cleanup
   image: $DOCKER_IMAGE
   <<: *dev_environment
-  include: 'ci/scripts/cleanup/cleanup_dev.yml'
+  #include: 'ci/scripts/cleanup/cleanup_dev.yml'
+  extends: .cleanup_dev_script
   environment:
     name: $ENVIRONMENT
     action: stop
@@ -281,7 +297,8 @@ cleanup:prod:
   stage: cleanup
   image: $DOCKER_IMAGE
   <<: *prod_environment
-  include: 'ci/scripts/cleanup/cleanup_prod.yml'
+  #include: 'ci/scripts/cleanup/cleanup_prod.yml'
+  extends: .cleanup_prod_script
   environment:
     name: $ENVIRONMENT
     action: stop

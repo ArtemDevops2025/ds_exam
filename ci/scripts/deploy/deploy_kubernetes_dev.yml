@@ -1,15 +1,16 @@
-before_script:
-  - mkdir -p ~/.ssh
-  - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-  - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-  - |
-    if [ -z "$MASTER_IP" ]; then
-      echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
-      exit 1
-    fi
-  - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-  - echo "Starting deployment to ${ENVIRONMENT} environment at $(date)"
-script:
+.deploy_kubernenets_dev_template:
+  before_script:
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    - |
+      if [ -z "$MASTER_IP" ]; then
+        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
+        exit 1
+      fi
+    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - echo "Starting deployment to ${ENVIRONMENT} environment at $(date)"
+  script:
   # Create directories and transfer files
   - echo "Setting up remote environment..."
   - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR-${ENVIRONMENT}"

@@ -1,7 +1,8 @@
-script:
-  - ls -la terraform/environment/
-  - cd terraform
-  - ls -la environment/
-  - terraform init
-  - terraform workspace select dev 2>/dev/null || terraform workspace new dev
-  - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
+.plan_script_dev:
+  script:
+    - ls -la terraform/environment/
+    - cd terraform
+    - ls -la environment/
+    - terraform init
+    - terraform workspace select dev 2>/dev/null || terraform workspace new dev
+    - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan

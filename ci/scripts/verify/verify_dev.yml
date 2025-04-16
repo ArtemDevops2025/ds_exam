@@ -1,10 +1,11 @@
-before_script:
-  - mkdir -p ~/.ssh
-  - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-  - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-  - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-  - echo "Starting verification of ${ENVIRONMENT} environment at $(date)"
-script:
+.verify_dev_script:
+  before_script:
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - echo "Starting verification of ${ENVIRONMENT} environment at $(date)"
+  script:
   # Check resources status
   - |
     echo "Pod Status:"

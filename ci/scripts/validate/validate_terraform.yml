@@ -1,4 +1,5 @@
-script:
-  - cd terraform
-  - terraform init
-  - terraform validate
+.validate_script_terraform:
+  script:
+    - cd terraform
+    - terraform init
+    - terraform validate
