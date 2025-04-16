@@ -104,6 +104,7 @@ validate:kubernetes:
     # - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
+    - if: $CI_COMMIT_BRANCH == "dev_chris"
     # - if: $CI_COMMIT_BRANCH == "monitoring"
 
 validate:terraform:
@@ -115,6 +116,7 @@ validate:terraform:
   #  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
+    - if: $CI_COMMIT_BRANCH == "dev_chris"
   #  - if: $CI_COMMIT_BRANCH == "monitoring"
 
 plan:dev:
@@ -147,6 +149,7 @@ build:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
+    - if: $CI_COMMIT_BRANCH == "dev_chris"
   #  - if: $CI_COMMIT_BRANCH == "monitoring"
   artifacts:
     paths:
@@ -222,6 +225,7 @@ monitoring:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
+    - if: $CI_COMMIT_BRANCH == "dev_chris"
     #- if: $CI_COMMIT_BRANCH == "monitoring"
   needs:
     - job: deploy:kubernetes:dev
