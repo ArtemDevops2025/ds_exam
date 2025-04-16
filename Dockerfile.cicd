@@ -1,0 +1,29 @@
+FROM alpine:latest
+
+# Install common tools needed across jobs
+RUN apk add --no-cache \
+    openssh-client \
+    bash \
+    coreutils \
+    curl \
+    jq \
+    grep \
+    yamllint \
+    php \
+    php-mysqli \
+    unzip
+
+# Set up any environment variables or configurations
+ENV TERRAFORM_VERSION=1.5.7
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
+
+# Install Terraform
+RUN wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip \
+    && unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip -d /usr/bin \
+    && rm terraform_${TERRAFORM_VERSION}_linux_amd64.zip \
+    && chmod +x /usr/bin/terraform
+
+# Create .ssh directory for keys
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
+
+WORKDIR /builds

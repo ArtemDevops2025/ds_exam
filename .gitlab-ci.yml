@@ -84,7 +84,10 @@ lint:
     #- if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
+<<<<<<< HEAD
     - if: $CI_COMMIT_BRANCH == "dev_chris"
+=======
+>>>>>>> origin/dev
     #- if: $CI_COMMIT_BRANCH == "monitoring"
   allow_failure: true
 
