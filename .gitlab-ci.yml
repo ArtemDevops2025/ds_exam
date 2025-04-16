@@ -85,7 +85,7 @@ build:cicd-image:
 lint:
   stage: lint
   image: $DOCKER_IMAGE
-  include: 'ci/scripts/lint/lint.yml'
+  #include: 'ci/scripts/lint/lint.yml'
   extends: .lint_script_template
   rules:
     #- if: $CI_PIPELINE_SOURCE == "merge_request_event"
