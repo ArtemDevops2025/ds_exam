@@ -1,0 +1,12 @@
+script:
+  - /bin/sh -c 'echo "Linting YAML files for best practices..."'
+  - echo "Linting YAML files for best practices..."
+  - |
+    cat > .yamllint <<EOF
+    extends: default
+    rules:
+      line-length: disable
+      comments:
+        min-spaces-from-content: 1
+    EOF
+  - yamllint -c .yamllint $KUBERNETES_DIR/{templates,environments}/*.yaml* || echo "Linting found issues, but continuing pipeline"

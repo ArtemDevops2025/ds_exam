@@ -1,0 +1,162 @@
+script:
+  - echo "Building WordPress configuration and deployment artifacts..."
+  
+  # Generate K3s manifests for the appropriate environment
+  - chmod +x ./generate-k3s-manifests.sh
+  - |
+    if [ "$CI_COMMIT_BRANCH" == "development" ]; then
+      ./generate-k3s-manifests.sh dev
+    elif [ "$CI_COMMIT_BRANCH" == "main" ]; then
+      ./generate-k3s-manifests.sh prod
+    else
+      echo "Branch not recognized for environment selection, defaulting to dev"
+      ./generate-k3s-manifests.sh dev
+    fi
+  
+  # Create QA test scripts
+  - mkdir -p $KUBERNETES_DIR/tests
+  - |
+    cat > $KUBERNETES_DIR/tests/api-tests.sh <<'EOF'
+    #!/bin/bash
+    # Basic WordPress API tests
+    HOST=$1
+    
+    echo "Testing WordPress REST API..."
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$HOST:32412/wp-json/)
+    if [ $HTTP_CODE -eq 200 ]; then
+      echo "✅ WordPress REST API is accessible"
+    else
+      echo "❌ WordPress REST API is not accessible (HTTP $HTTP_CODE)"
+    fi
+    
+    echo "Testing WordPress posts endpoint..."
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$HOST:32412/wp-json/wp/v2/posts)
+    if [ $HTTP_CODE -eq 200 ]; then
+      echo "✅ WordPress posts endpoint is accessible"
+    else
+      echo "❌ WordPress posts endpoint is not accessible (HTTP $HTTP_CODE)"
+    fi
+    EOF
+    chmod +x $KUBERNETES_DIR/tests/api-tests.sh
+  
+  - |
+    cat > $KUBERNETES_DIR/tests/unit-tests.php <<'EOF'
+    <?php
+    echo "Running WordPress unit tests...\n";
+    
+    // Test database connection
+    echo "Testing database connection... ";
+    $dbhost = getenv('WORDPRESS_DB_HOST') ?: 'wordpress-mysql';
+    $dbuser = getenv('WORDPRESS_DB_USER') ?: 'wordpress';
+    $dbpass = getenv('WORDPRESS_DB_PASSWORD') ?: 'password';
+    $dbname = 'wordpress';
+    
+    $conn = new mysqli($dbhost, $dbuser, $dbpass, $dbname);
+    if ($conn->connect_error) {
+      echo "❌ Failed: " . $conn->connect_error . "\n";
+    } else {
+      echo "✅ Success\n";
+      $conn->close();
+    }
+    
+    // Test file permissions
+    echo "Testing file permissions... ";
+    $wp_content = '/var/www/html/wp-content';
+    if (is_writable($wp_content)) {
+      echo "✅ wp-content directory is writable\n";
+    } else {
+      echo "❌ wp-content directory is not writable\n";
+    }
+    
+    // Test PHP extensions
+    echo "Testing required PHP extensions...\n";
+    $required_extensions = ['mysqli', 'curl', 'gd', 'json'];
+    foreach ($required_extensions as $ext) {
+      if (extension_loaded($ext)) {
+        echo "✅ $ext extension loaded\n";
+      } else {
+        echo "❌ $ext extension not loaded\n";
+      }
+    }
+    
+    echo "Unit tests completed\n";
+    EOF
+  
+  # Generate MySQL service patch file
+  - mkdir -p $KUBERNETES_DIR/patches
+  - |
+    cat > $KUBERNETES_DIR/patches/mysql-service-patch.json <<EOF
+    [
+      {
+        "op": "replace", 
+        "path": "/spec/selector", 
+        "value": {
+          "app": "wordpress-mysql", 
+          "tier": "mysql"
+        }
+      }
+    ]
+    EOF
+  
+  # Generate wp-config.php with secure random keys
+  - mkdir -p $KUBERNETES_DIR/configmaps
+  - |
+    cat > $KUBERNETES_DIR/configmaps/wp-config.php <<EOF
+    <?php
+    define( 'DB_NAME', 'wordpress' );
+    define( 'DB_USER', 'wordpress' );
+    define( 'DB_PASSWORD', getenv('WORDPRESS_DB_PASSWORD') );
+    define( 'DB_HOST', 'wordpress-mysql' );
+    define( 'DB_CHARSET', 'utf8' );
+    define( 'DB_COLLATE', '' );
+
+    define( 'AUTH_KEY',         '$(openssl rand -hex 16)' );
+    define( 'SECURE_AUTH_KEY',  '$(openssl rand -hex 16)' );
+    define( 'LOGGED_IN_KEY',    '$(openssl rand -hex 16)' );
+    define( 'NONCE_KEY',        '$(openssl rand -hex 16)' );
+    define( 'AUTH_SALT',        '$(openssl rand -hex 16)' );
+    define( 'SECURE_AUTH_SALT', '$(openssl rand -hex 16)' );
+    define( 'LOGGED_IN_SALT',   '$(openssl rand -hex 16)' );
+    define( 'NONCE_SALT',       '$(openssl rand -hex 16)' );
+
+    \$table_prefix = 'wp_';
+
+    define( 'WP_DEBUG', true );
+    define( 'WP_DEBUG_LOG', true );
+    define( 'WP_DEBUG_DISPLAY', false );
+
+    // Dynamic site URL based on request
+    define('WP_HOME', 'http://' . \$_SERVER['HTTP_HOST']);
+    define('WP_SITEURL', 'http://' . \$_SERVER['HTTP_HOST']);
+    
+    // S3 configuration (if using)
+    if (getenv('S3_BUCKET')) {
+      define( 'S3_BUCKET', getenv('S3_BUCKET') );
+      define( 'S3_REGION', getenv('S3_REGION') );
+      define( 'S3_ACCESS_KEY', getenv('S3_ACCESS_KEY') );
+      define( 'S3_SECRET_KEY', getenv('S3_SECRET_KEY') );
+    }
+
+    if ( ! defined( 'ABSPATH' ) ) {
+      define( 'ABSPATH', __DIR__ . '/' );
+    }
+
+    require_once ABSPATH . 'wp-settings.php';
+    EOF
+  
+  # Create ConfigMap YAML for wp-config.php
+  - |
+    cat > $KUBERNETES_DIR/wp-config-map.yaml <<EOF
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: wordpress-config
+      namespace: wordpress-${ENVIRONMENT}
+      labels:
+        environment: ${ENVIRONMENT}
+    data:
+      wp-config.php: |
+    $(sed 's/^/    /' $KUBERNETES_DIR/configmaps/wp-config.php)
+    EOF
+  
+  - echo "Build artifacts successfully created!"

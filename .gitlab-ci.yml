@@ -19,7 +19,6 @@ variables:
   MONITORING_DIR: "monitoring"
   DOCKER_IMAGE: "${CI_REGISTRY_IMAGE}/cicd-tools:latest"
 
-
 # Environment-specific variables
 .dev_environment: &dev_environment
   variables:
@@ -55,31 +54,17 @@ build:cicd-image:
     - docker:dind
   variables:
     DOCKER_DRIVER: overlay2
-  script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker build -t $DOCKER_IMAGE -f Dockerfile.cicd .
-    - docker push $DOCKER_IMAGE
+  include: 'ci/scripts/build-image/build_cicd_image.yml'
   rules:
     - changes:
         - Dockerfile.cicd
     - if: $CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE == "push" # $CI_COMMIT_BRANCH == "main"
 #      when: manual
-# Make sure all files follow best practices
+
 lint:
   stage: lint
   image: $DOCKER_IMAGE
-  script:
-    - /bin/sh -c 'echo "Linting YAML files for best practices..."'
-    - echo "Linting YAML files for best practices..."
-    - |
-      cat > .yamllint <<EOF
-      extends: default
-      rules:
-        line-length: disable
-        comments:
-          min-spaces-from-content: 1
-      EOF
-    - yamllint -c .yamllint $KUBERNETES_DIR/{templates,environments}/*.yaml* || echo "Linting found issues, but continuing pipeline"
+  include: 'ci/scripts/lint/lint.yml'
   rules:
     #- if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
@@ -88,71 +73,41 @@ lint:
     #- if: $CI_COMMIT_BRANCH == "monitoring"
       allow_failure: true
 
-# Validate Kubernetes manifests templates
 validate:kubernetes:
   stage: validate
   image: $DOCKER_IMAGE
-  script:
-    - echo "Validating Kubernetes manifest templates..."
-    - |
-      for file in $KUBERNETES_DIR/templates/*.yaml.tpl; do
-        echo "Checking $file"
-        grep -q "apiVersion:" $file || (echo "Missing apiVersion in $file" && exit 1)
-        grep -q "kind:" $file || (echo "Missing kind in $file" && exit 1)
-        grep -q "metadata:" $file || (echo "Missing metadata in $file" && exit 1)
-        if grep -q "kind: Deployment" $file; then
-          grep -q "replicas:" $file || echo "Warning: No replicas specified in Deployment $file"
-          grep -q "resources:" $file || echo "Warning: No resource limits/requests in Deployment $file"
-        fi
-      done
-    - echo "All Kubernetes manifest templates are valid!"
+  include: 'ci/scripts/validate/validate_kubernetes.yml'
   rules:
     # - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
     # - if: $CI_COMMIT_BRANCH == "monitoring"
 
-# Terraform Validation for Both Environments
 validate:terraform:
   stage: validate
   image: $DOCKER_IMAGE
-  script:
-    - cd terraform
-    - terraform init
-    - terraform validate
+  include: 'ci/scripts/validate/validate_terraform.yml'
   rules:
   #  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
   #  - if: $CI_COMMIT_BRANCH == "monitoring"
 
-# Terraform Plan - Dev
 plan:dev:
   stage: plan
   image: $DOCKER_IMAGE
   <<: *dev_environment
-  script:
-    - ls -la terraform/environment/
-    - cd terraform
-    - ls -la environment/
-    - terraform init
-    - terraform workspace select dev 2>/dev/null || terraform workspace new dev
-    - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
+  include: 'ci/scripts/plan/plan_dev.yml'
   artifacts:
     paths:
       - terraform/tfplan
     expire_in: 1 day
 
-# Terraform Plan - Prod
 plan:prod:
   stage: plan
   image: $DOCKER_IMAGE
   <<: *prod_environment
-  script:
-    - cd terraform
-    - terraform init
-    - terraform workspace select prod 2>/dev/null || terraform workspace new prod
-    - terraform plan -var-file=${TF_VAR_FILE} -out=tfplan
+  include: 'ci/scripts/plan/plan_prod.yml'
   artifacts:
     paths:
       - terraform/tfplan
@@ -161,168 +116,7 @@ plan:prod:
 build:
   stage: build
   image: $DOCKER_IMAGE
-  script:
-    - echo "Building WordPress configuration and deployment artifacts..."
-    
-    # Generate K3s manifests for the appropriate environment
-    - chmod +x ./generate-k3s-manifests.sh
-    - |
-      if [ "$CI_COMMIT_BRANCH" == "development" ]; then
-        ./generate-k3s-manifests.sh dev
-      elif [ "$CI_COMMIT_BRANCH" == "main" ]; then
-        ./generate-k3s-manifests.sh prod
-      else
-        echo "Branch not recognized for environment selection, defaulting to dev"
-        ./generate-k3s-manifests.sh dev
-      fi
-    
-    # Create QA test scripts
-    - mkdir -p $KUBERNETES_DIR/tests
-    - |
-      cat > $KUBERNETES_DIR/tests/api-tests.sh <<'EOF'
-      #!/bin/bash
-      # Basic WordPress API tests
-      HOST=$1
-      
-      echo "Testing WordPress REST API..."
-      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$HOST:32412/wp-json/)
-      if [ $HTTP_CODE -eq 200 ]; then
-        echo "✅ WordPress REST API is accessible"
-      else
-        echo "❌ WordPress REST API is not accessible (HTTP $HTTP_CODE)"
-      fi
-      
-      echo "Testing WordPress posts endpoint..."
-      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$HOST:32412/wp-json/wp/v2/posts)
-      if [ $HTTP_CODE -eq 200 ]; then
-        echo "✅ WordPress posts endpoint is accessible"
-      else
-        echo "❌ WordPress posts endpoint is not accessible (HTTP $HTTP_CODE)"
-      fi
-      EOF
-      chmod +x $KUBERNETES_DIR/tests/api-tests.sh
-    
-    - |
-      cat > $KUBERNETES_DIR/tests/unit-tests.php <<'EOF'
-      <?php
-      echo "Running WordPress unit tests...\n";
-      
-      // Test database connection
-      echo "Testing database connection... ";
-      $dbhost = getenv('WORDPRESS_DB_HOST') ?: 'wordpress-mysql';
-      $dbuser = getenv('WORDPRESS_DB_USER') ?: 'wordpress';
-      $dbpass = getenv('WORDPRESS_DB_PASSWORD') ?: 'password';
-      $dbname = 'wordpress';
-      
-      $conn = new mysqli($dbhost, $dbuser, $dbpass, $dbname);
-      if ($conn->connect_error) {
-        echo "❌ Failed: " . $conn->connect_error . "\n";
-      } else {
-        echo "✅ Success\n";
-        $conn->close();
-      }
-      
-      // Test file permissions
-      echo "Testing file permissions... ";
-      $wp_content = '/var/www/html/wp-content';
-      if (is_writable($wp_content)) {
-        echo "✅ wp-content directory is writable\n";
-      } else {
-        echo "❌ wp-content directory is not writable\n";
-      }
-      
-      // Test PHP extensions
-      echo "Testing required PHP extensions...\n";
-      $required_extensions = ['mysqli', 'curl', 'gd', 'json'];
-      foreach ($required_extensions as $ext) {
-        if (extension_loaded($ext)) {
-          echo "✅ $ext extension loaded\n";
-        } else {
-          echo "❌ $ext extension not loaded\n";
-        }
-      }
-      
-      echo "Unit tests completed\n";
-      EOF
-    
-    # Generate MySQL service patch file
-    - mkdir -p $KUBERNETES_DIR/patches
-    - |
-      cat > $KUBERNETES_DIR/patches/mysql-service-patch.json <<EOF
-      [
-        {
-          "op": "replace", 
-          "path": "/spec/selector", 
-          "value": {
-            "app": "wordpress-mysql", 
-            "tier": "mysql"
-          }
-        }
-      ]
-      EOF
-    
-    # Generate wp-config.php with secure random keys
-    - mkdir -p $KUBERNETES_DIR/configmaps
-    - |
-      cat > $KUBERNETES_DIR/configmaps/wp-config.php <<EOF
-      <?php
-      define( 'DB_NAME', 'wordpress' );
-      define( 'DB_USER', 'wordpress' );
-      define( 'DB_PASSWORD', getenv('WORDPRESS_DB_PASSWORD') );
-      define( 'DB_HOST', 'wordpress-mysql' );
-      define( 'DB_CHARSET', 'utf8' );
-      define( 'DB_COLLATE', '' );
-
-      define( 'AUTH_KEY',         '$(openssl rand -hex 16)' );
-      define( 'SECURE_AUTH_KEY',  '$(openssl rand -hex 16)' );
-      define( 'LOGGED_IN_KEY',    '$(openssl rand -hex 16)' );
-      define( 'NONCE_KEY',        '$(openssl rand -hex 16)' );
-      define( 'AUTH_SALT',        '$(openssl rand -hex 16)' );
-      define( 'SECURE_AUTH_SALT', '$(openssl rand -hex 16)' );
-      define( 'LOGGED_IN_SALT',   '$(openssl rand -hex 16)' );
-      define( 'NONCE_SALT',       '$(openssl rand -hex 16)' );
-
-      \$table_prefix = 'wp_';
-
-      define( 'WP_DEBUG', true );
-      define( 'WP_DEBUG_LOG', true );
-      define( 'WP_DEBUG_DISPLAY', false );
-
-      // Dynamic site URL based on request
-      define('WP_HOME', 'http://' . \$_SERVER['HTTP_HOST']);
-      define('WP_SITEURL', 'http://' . \$_SERVER['HTTP_HOST']);
-      
-      // S3 configuration (if using)
-      if (getenv('S3_BUCKET')) {
-        define( 'S3_BUCKET', getenv('S3_BUCKET') );
-        define( 'S3_REGION', getenv('S3_REGION') );
-        define( 'S3_ACCESS_KEY', getenv('S3_ACCESS_KEY') );
-        define( 'S3_SECRET_KEY', getenv('S3_SECRET_KEY') );
-      }
-
-      if ( ! defined( 'ABSPATH' ) ) {
-        define( 'ABSPATH', __DIR__ . '/' );
-      }
-
-      require_once ABSPATH . 'wp-settings.php';
-      EOF
-    
-    # Create ConfigMap YAML for wp-config.php
-    - |
-      cat > $KUBERNETES_DIR/wp-config-map.yaml <<EOF
-      apiVersion: v1
-      kind: ConfigMap
-      metadata:
-        name: wordpress-config
-        namespace: wordpress-${ENVIRONMENT}
-        labels:
-          environment: ${ENVIRONMENT}
-      data:
-        wp-config.php: |
-      $(sed 's/^/    /' $KUBERNETES_DIR/configmaps/wp-config.php)
-      EOF
-    
-    - echo "Build artifacts successfully created!"
+  include: 'ci/scripts/build/build.yml'
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
@@ -332,21 +126,11 @@ build:
       - $KUBERNETES_DIR/
     expire_in: 1 week
 
-# Deploy Terraform infrastructure - Dev
 deploy:terraform:dev:
   stage: deploy
   image: $DOCKER_IMAGE
   <<: *dev_environment
-  script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - cd terraform
-    - terraform init
-    - terraform workspace select dev 2>/dev/null || terraform workspace new dev
-    - terraform apply -var-file=${TF_VAR_FILE} -auto-approve
-    - MASTER_IP=$(terraform output -raw k3s_master_ip)
-    - echo "MASTER_IP=$MASTER_IP" >> terraform.env
+  include: 'ci/scripts/deploy/deploy_terraform_dev.yml'
   artifacts:
     reports:
       dotenv: terraform/terraform.env
@@ -354,21 +138,11 @@ deploy:terraform:dev:
       - terraform/terraform.env
     expire_in: 1 day
 
-# Deploy Terraform infrastructure - Prod
 deploy:terraform:prod:
   stage: deploy
   image: $DOCKER_IMAGE
   <<: *prod_environment
-  script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - cd terraform
-    - terraform init
-    - terraform workspace select prod 2>/dev/null || terraform workspace new prod
-    - terraform apply -var-file=${TF_VAR_FILE} -auto-approve
-    - MASTER_IP=$(terraform output -raw k3s_master_ip)
-    - echo "MASTER_IP=$MASTER_IP" >> terraform.env
+  include: 'ci/scripts/deploy/deploy_terraform_prod.yml'
   artifacts:
     reports:
       dotenv: terraform/terraform.env
@@ -377,7 +151,6 @@ deploy:terraform:prod:
     expire_in: 1 day
   when: manual
 
-# Deploy Kubernetes resources - Dev
 deploy:kubernetes:dev:
   stage: deploy
   image: $DOCKER_IMAGE
@@ -385,91 +158,7 @@ deploy:kubernetes:dev:
   needs:
     - deploy:terraform:dev
     - build
-  before_script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - |
-      if [ -z "$MASTER_IP" ]; then
-        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
-        exit 1
-      fi
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-    - echo "Starting deployment to ${ENVIRONMENT} environment at $(date)"
-  script:
-    # Create directories and transfer files
-    - echo "Setting up remote environment..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR-${ENVIRONMENT}"
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/environments/dev/*.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR-${ENVIRONMENT}/
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/patches/* ubuntu@$MASTER_IP:~/$REMOTE_DIR-${ENVIRONMENT}/ || echo "No patches to copy"
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/wp-config-map.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR-${ENVIRONMENT}/
-    
-    # Copy QA test files to remote server
-    - echo "Copying QA test files to remote server..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR-${ENVIRONMENT}/tests"
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/tests/* ubuntu@$MASTER_IP:~/$REMOTE_DIR-${ENVIRONMENT}/tests/ || echo "No test files to copy"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "chmod +x ~/$REMOTE_DIR-${ENVIRONMENT}/tests/*.sh || true"
-    
-    # Fix potential pre-existing issues
-    - echo "Preparing Kubernetes cluster..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission || true'"
-    
-    # Core deployments - apply in specific order
-    - echo "Deploying core infrastructure..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} &&
-      echo \"Creating namespace...\" &&
-      sudo kubectl apply -f namespace.yaml &&
-      echo \"Applying secrets...\" &&
-      sudo kubectl apply -f s3-secret.yaml &&
-      echo \"Creating persistent volumes...\" &&
-      sudo kubectl apply -f wordpress-pvc.yaml &&
-      echo \"Applying config map...\" &&
-      sudo kubectl apply -f wp-config-map.yaml'"
-    
-    # Database deployment
-    - echo "Deploying database..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} &&
-      sudo kubectl apply -f mysql-deployment.yaml &&
-      echo \"Waiting for MySQL to be ready...\" &&
-      timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress-${ENVIRONMENT} -l tier=mysql -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"MySQL deployment timed out but continuing\"'"
-    
-    # Fix MySQL service selector - using a patch file approach to avoid quoting issues
-    - echo "Fixing MySQL service selector..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "
-        echo '[{\"op\": \"replace\", \"path\": \"/spec/selector\", \"value\": {\"app\": \"wordpress-mysql\", \"tier\": \"mysql\"}}]' > patch.json
-        sudo kubectl patch svc wordpress-mysql -n wordpress-${ENVIRONMENT} --type=json --patch-file patch.json || true
-        rm patch.json
-      "
-    
-    # Application deployment
-    - echo "Deploying WordPress application..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} &&
-      sudo kubectl apply -f wordpress-deployment.yaml &&
-      echo \"Waiting for WordPress to be ready...\" &&
-      timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress-${ENVIRONMENT} -l app=wordpress,environment=${ENVIRONMENT} -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"WordPress deployment timed out but continuing\"'"
-    
-    # Network configuration
-    - echo "Configuring network resources..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} &&
-      echo \"Creating services...\" &&
-      sudo kubectl apply -f wordpress-service.yaml &&
-      sudo kubectl apply -f wordpress-loadbalancer.yaml &&
-      echo \"Waiting for services to be assigned IPs...\" &&
-      timeout 60 bash -c \"until sudo kubectl get svc wordpress-lb -n wordpress-${ENVIRONMENT} -o jsonpath=\\\"{.spec.clusterIP}\\\" | grep -q -v none; do sleep 2; done\" || echo \"Service IP assignment timed out but continuing\"'"
-    
-    # Ingress configuration
-    - echo "Configuring ingress..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} &&
-      echo \"Applying ingress...\" &&
-      sudo kubectl apply -f ingress.yaml || echo \"Ingress creation failed but continuing deployment\"'"
-    
-    - echo "WordPress deployment to ${ENVIRONMENT} environment completed successfully at $(date)!"
+  include: 'ci/scripts/deploy/deploy_kubernetes_dev.yml'
   environment:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
@@ -478,7 +167,6 @@ deploy:kubernetes:dev:
       - $KUBERNETES_DIR/
     expire_in: 1 week
 
-# Deploy Kubernetes resources - Prod
 deploy:kubernetes:prod:
   stage: deploy
   image: $DOCKER_IMAGE
@@ -486,91 +174,7 @@ deploy:kubernetes:prod:
   needs:
     - deploy:terraform:prod
     - build
-  before_script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - |
-      if [ -z "$MASTER_IP" ]; then
-        echo "MASTER_IP is not set. Please configure this variable in CI/CD settings."
-        exit 1
-      fi
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-    - echo "Starting deployment to ${ENVIRONMENT} environment at $(date)"
-  script:
-    # Same script as dev environment, but with different environment variables
-    - echo "Setting up remote environment..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR-${ENVIRONMENT}"
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/environments/prod/*.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR-${ENVIRONMENT}/
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/patches/* ubuntu@$MASTER_IP:~/$REMOTE_DIR-${ENVIRONMENT}/ || echo "No patches to copy"
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/wp-config-map.yaml ubuntu@$MASTER_IP:~/$REMOTE_DIR-${ENVIRONMENT}/
-    
-    # Copy QA test files to remote server
-    - echo "Copying QA test files to remote server..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$REMOTE_DIR-${ENVIRONMENT}/tests"
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/tests/* ubuntu@$MASTER_IP:~/$REMOTE_DIR-${ENVIRONMENT}/tests/ || echo "No test files to copy"
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "chmod +x ~/$REMOTE_DIR-${ENVIRONMENT}/tests/*.sh || true"
-    
-    # Fix potential pre-existing issues
-    - echo "Preparing Kubernetes cluster..."
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission || true'"
-    
-    # Core deployments - apply in specific order
-    - echo "Deploying core infrastructure..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} &&
-      echo \"Creating namespace...\" &&
-      sudo kubectl apply -f namespace.yaml &&
-      echo \"Applying secrets...\" &&
-      sudo kubectl apply -f s3-secret.yaml &&
-      echo \"Creating persistent volumes...\" &&
-      sudo kubectl apply -f wordpress-pvc.yaml &&
-      echo \"Applying config map...\" &&
-      sudo kubectl apply -f wp-config-map.yaml'"
-    
-    # Database deployment
-    - echo "Deploying database..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} &&
-      sudo kubectl apply -f mysql-deployment.yaml &&
-      echo \"Waiting for MySQL to be ready...\" &&
-      timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress-${ENVIRONMENT} -l tier=mysql -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"MySQL deployment timed out but continuing\"'"
-    
-    # Fix MySQL service selector - using a patch file approach to avoid quoting issues
-    - echo "Fixing MySQL service selector..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "
-        echo '[{\"op\": \"replace\", \"path\": \"/spec/selector\", \"value\": {\"app\": \"wordpress-mysql\", \"tier\": \"mysql\"}}]' > patch.json
-        sudo kubectl patch svc wordpress-mysql -n wordpress-${ENVIRONMENT} --type=json --patch-file patch.json || true
-        rm patch.json
-      "
-    
-    # Application deployment
-    - echo "Deploying WordPress application..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} &&
-      sudo kubectl apply -f wordpress-deployment.yaml &&
-      echo \"Waiting for WordPress to be ready...\" &&
-      timeout $DEPLOYMENT_TIMEOUT bash -c \"until sudo kubectl get pods -n wordpress-${ENVIRONMENT} -l app=wordpress,environment=${ENVIRONMENT} -o jsonpath=\\\"{.items[0].status.phase}\\\" | grep -q Running; do sleep 5; done\" || echo \"WordPress deployment timed out but continuing\"'"
-    
-    # Network configuration
-    - echo "Configuring network resources..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} &&
-      echo \"Creating services...\" &&
-      sudo kubectl apply -f wordpress-service.yaml &&
-      sudo kubectl apply -f wordpress-loadbalancer.yaml &&
-      echo \"Waiting for services to be assigned IPs...\" &&
-      timeout 60 bash -c \"until sudo kubectl get svc wordpress-lb -n wordpress-${ENVIRONMENT} -o jsonpath=\\\"{.spec.clusterIP}\\\" | grep -q -v none; do sleep 2; done\" || echo \"Service IP assignment timed out but continuing\"'"
-    
-    # Ingress configuration
-    - echo "Configuring ingress..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} &&
-      echo \"Applying ingress...\" &&
-      sudo kubectl apply -f ingress.yaml || echo \"Ingress creation failed but continuing deployment\"'"
-    
-    - echo "WordPress deployment to ${ENVIRONMENT} environment completed successfully at $(date)!"
+  include: 'ci/scripts/deploy/deploy_kubernetes_prod.yml'
   environment:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
@@ -579,126 +183,10 @@ deploy:kubernetes:prod:
       - $KUBERNETES_DIR/
     expire_in: 1 week
 
-# Verify deployment for production
-verify:prod:
-  stage: verify
-  image: $DOCKER_IMAGE
-  <<: *prod_environment
-  needs:
-    - deploy:kubernetes:prod
-  before_script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-    - echo "Starting verification of ${ENVIRONMENT} environment at $(date)"
-  script:
-    # Check resources status
-    - |
-      echo "Pod Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n wordpress-${ENVIRONMENT} -o wide'"
-    - |
-      echo "Service Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get svc -n wordpress-${ENVIRONMENT}'"
-    - |
-      echo "Ingress Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress -n wordpress-${ENVIRONMENT} || echo \"No ingress found but continuing verification\"'"
-    - |
-      echo "PVC Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pvc -n wordpress-${ENVIRONMENT}'"
-    
-    - echo "Waiting for services to be fully available..."
-    - sleep 45
-    
-    # Check application accessibility - ClusterIP
-    - |
-      echo "Checking WordPress availability via LoadBalancer cluster IP..."
-      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'export CLUSTER_IP=\$(sudo kubectl get svc wordpress-lb -n wordpress-${ENVIRONMENT} -o jsonpath={.spec.clusterIP}) && curl -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://\${CLUSTER_IP}'") || echo "LoadBalancer check failed, but continuing verification"
-      echo "ClusterIP Check Result: $RESPONSE"
-      if [[ "$RESPONSE" == "200" ]]; then echo "✅ ClusterIP check passed"; else echo "⚠️ ClusterIP check returned non-200 response"; fi
-    
-    # Check application accessibility via Ingress
-    - |
-      echo "Checking WordPress availability via Ingress..."
-      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://$MASTER_IP.nip.io'") || echo "Ingress check failed, but continuing verification"
-      echo "Ingress Check Result: $RESPONSE"
-      if [[ "$RESPONSE" == "200" ]]; then echo "✅ Ingress check passed"; else echo "⚠️ Ingress check returned non-200 response"; fi
-      
-      if [[ "$RESPONSE" != "200" ]]; then
-        echo "Trying alternative Ingress access methods..."
-        
-        echo "Method 1: Using Host header with direct IP..."
-        RESPONSE2=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://$MASTER_IP'") || echo "Alternative Ingress check failed"
-        echo "Alternative Ingress Check Result (Method 1): $RESPONSE2"
-        if [[ "$RESPONSE2" == "200" ]]; then echo "✅ Alternative Ingress check passed"; fi
-      fi
-    
-    # Verify environment-specific configuration
-    - |
-      echo "Verifying environment-specific configuration..."
-      
-      echo "Checking WordPress deployment replicas..."
-      REPLICAS=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get deployment wordpress -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.spec.replicas}\"'")
-      echo "Configured replicas: $REPLICAS (Expected: ${REPLICA_COUNT})"
-      if [[ "$REPLICAS" == "${REPLICA_COUNT}" ]]; then echo "✅ Replica count matches environment configuration"; else echo "⚠️ Replica count does not match environment configuration"; fi
-      
-      echo "Checking WordPress deployment resource limits..."
-      MEMORY_LIMIT_ACTUAL=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get deployment wordpress -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.spec.template.spec.containers[0].resources.limits.memory}\"'")
-      echo "Configured memory limit: $MEMORY_LIMIT_ACTUAL (Expected: ${MEMORY_LIMIT})"
-      if [[ "$MEMORY_LIMIT_ACTUAL" == "${MEMORY_LIMIT}" ]]; then echo "✅ Memory limit matches environment configuration"; else echo "⚠️ Memory limit does not match environment configuration"; fi
-    
-    # Enhanced verification for production environment
-    - |
-      echo "Running production-specific checks..."
-      
-      # Check TLS/HTTPS if enabled in production
-      echo "Checking HTTPS access if enabled..."
-      HTTPS_ENABLED=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.items[0].spec.tls}\" 2>/dev/null'")
-      if [[ -n "$HTTPS_ENABLED" ]]; then
-        echo "TLS is configured, checking HTTPS access..."
-        HTTPS_RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -k -L -s --retry 3 --retry-delay 5 -o /dev/null -w %{http_code} https://$MASTER_IP.nip.io'") || echo "HTTPS check failed"
-        echo "HTTPS Check Result: $HTTPS_RESPONSE"
-        if [[ "$HTTPS_RESPONSE" == "200" ]]; then echo "✅ HTTPS check passed"; else echo "⚠️ HTTPS check returned non-200 response"; fi
-      else
-        echo "TLS not configured in ingress."
-      fi
-      
-      # Check high availability for production
-      echo "Checking high availability..."
-      POD_COUNT=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n wordpress-${ENVIRONMENT} -l app=wordpress -o name | wc -l'")
-      echo "WordPress pod count: $POD_COUNT (Expected: at least ${REPLICA_COUNT})"
-      if [[ "$POD_COUNT" -ge "${REPLICA_COUNT}" ]]; then echo "✅ High availability check passed"; else echo "⚠️ High availability check failed"; fi
-    
-    # Summary
-    - echo "Verification of ${ENVIRONMENT} environment completed at $(date)!"
-  environment:
-    name: $ENVIRONMENT
-    url: http://$MASTER_IP.nip.io
-
 monitoring:
   stage: monitoring
   image: $DOCKER_IMAGE
-  before_script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-  script:
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$MONITORING_DIR/prometheus ~/$MONITORING_DIR/grafana"
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/monitoring-namespace.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/prometheus/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/prometheus/
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/grafana/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/grafana/
-    - >
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "
-        sudo kubectl apply -f ~/$MONITORING_DIR/monitoring-namespace.yaml &&
-        sudo kubectl apply -f ~/$MONITORING_DIR/prometheus/ &&
-        sudo kubectl apply -f ~/$MONITORING_DIR/grafana/ &&
-        timeout 120 bash -c 'until sudo kubectl get pods -n monitoring -l app=prometheus -o jsonpath=\"{.items[0].status.phase}\" | grep -q Running; do sleep 5; done' ||
-        echo 'Prometheus timed out' &&
-        timeout 120 bash -c 'until sudo kubectl get pods -n monitoring -l app=grafana -o jsonpath=\"{.items[0].status.phase}\" | grep -q Running; do sleep 5; done' ||
-        echo 'Grafana timed out'
-      "
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get all -n monitoring"
+  include: 'ci/scripts/monitoring/monitoring.yml'
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
@@ -712,81 +200,27 @@ monitoring:
     name: $CI_COMMIT_BRANCH-monitoring
     url: http://$MASTER_IP:30300
 
-# Verify deployment is working correctly for dev
+verify:prod:
+  stage: verify
+  image: $DOCKER_IMAGE
+  <<: *prod_environment
+  needs:
+    - deploy:kubernetes:prod
+  include: 'ci/scripts/verify/verify_prod.yml'
+  environment:
+    name: $ENVIRONMENT
+    url: http://$MASTER_IP.nip.io
+
 verify:dev:
   stage: verify
   image: $DOCKER_IMAGE
   <<: *dev_environment
   needs:
     - deploy:kubernetes:dev
-  before_script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-    - echo "Starting verification of ${ENVIRONMENT} environment at $(date)"
-  script:
-    # Check resources status
-    - |
-      echo "Pod Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pods -n wordpress-${ENVIRONMENT} -o wide'"
-    - |
-      echo "Service Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get svc -n wordpress-${ENVIRONMENT}'"
-    - |
-      echo "Ingress Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get ingress -n wordpress-${ENVIRONMENT} || echo \"No ingress found but continuing verification\"'"
-    - |
-      echo "PVC Status:"
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get pvc -n wordpress-${ENVIRONMENT}'"
-    
-    - echo "Waiting for services to be fully available..."
-    - sleep 45
-    
-    # Check application accessibility - ClusterIP
-    - |
-      echo "Checking WordPress availability via LoadBalancer cluster IP..."
-      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'export CLUSTER_IP=\$(sudo kubectl get svc wordpress-lb -n wordpress-${ENVIRONMENT} -o jsonpath={.spec.clusterIP}) && curl -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://\${CLUSTER_IP}'") || echo "LoadBalancer check failed, but continuing verification"
-      echo "ClusterIP Check Result: $RESPONSE"
-      if [[ "$RESPONSE" == "200" ]]; then echo "✅ ClusterIP check passed"; else echo "⚠️ ClusterIP check returned non-200 response"; fi
-    
-    # Check application accessibility via Ingress
-    - |
-      echo "Checking WordPress availability via Ingress..."
-      RESPONSE=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -o /dev/null -w %{http_code} http://$MASTER_IP.nip.io'") || echo "Ingress check failed, but continuing verification"
-      echo "Ingress Check Result: $RESPONSE"
-      if [[ "$RESPONSE" == "200" ]]; then echo "✅ Ingress check passed"; else echo "⚠️ Ingress check returned non-200 response"; fi
-      
-      if [[ "$RESPONSE" != "200" ]]; then
-        echo "Trying alternative Ingress access methods..."
-        
-        echo "Method 1: Using Host header with direct IP..."
-        RESPONSE2=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'curl -L -s --retry 5 --retry-delay 10 -H \"Host: $MASTER_IP.nip.io\" -o /dev/null -w %{http_code} http://$MASTER_IP'") || echo "Alternative Ingress check failed"
-        echo "Alternative Ingress Check Result (Method 1): $RESPONSE2"
-        if [[ "$RESPONSE2" == "200" ]]; then echo "✅ Alternative Ingress check passed"; fi
-      fi
-    
-    # Verify environment-specific configuration
-    - |
-      echo "Verifying environment-specific configuration..."
-      
-      echo "Checking WordPress deployment replicas..."
-      REPLICAS=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get deployment wordpress -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.spec.replicas}\"'")
-      echo "Configured replicas: $REPLICAS (Expected: ${REPLICA_COUNT})"
-      if [[ "$REPLICAS" == "${REPLICA_COUNT}" ]]; then echo "✅ Replica count matches environment configuration"; else echo "⚠️ Replica count does not match environment configuration"; fi
-      
-      echo "Checking WordPress deployment resource limits..."
-      MEMORY_LIMIT_ACTUAL=$(ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'sudo kubectl get deployment wordpress -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.spec.template.spec.containers[0].resources.limits.memory}\"'")
-      echo "Configured memory limit: $MEMORY_LIMIT_ACTUAL (Expected: ${MEMORY_LIMIT})"
-      if [[ "$MEMORY_LIMIT_ACTUAL" == "${MEMORY_LIMIT}" ]]; then echo "✅ Memory limit matches environment configuration"; else echo "⚠️ Memory limit does not match environment configuration"; fi
-    
-    # Summary
-    - echo "Verification of ${ENVIRONMENT} environment completed at $(date)!"
+  include: 'ci/scripts/verify/verify_dev.yml'
   environment:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
-
-    # Quality Assurance testing - Dev
 
 qa:dev:
   stage: qa
@@ -794,255 +228,41 @@ qa:dev:
   <<: *dev_environment
   needs:
     - verify:dev
-  before_script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-    - echo "Starting QA tests for ${ENVIRONMENT} environment at $(date)"
-  script:
-    # Run API tests
-    - echo "Running WordPress API tests..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} && 
-      ./tests/api-tests.sh $MASTER_IP'"
-    
-    # Run unit tests inside WordPress pod
-    - echo "Running WordPress unit tests..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      WP_POD=\$(sudo kubectl get pod -l app=wordpress,environment=${ENVIRONMENT} -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.items[0].metadata.name}\")
-      echo "Using WordPress pod: \$WP_POD"
-      sudo kubectl cp ~/$REMOTE_DIR-${ENVIRONMENT}/tests/unit-tests.php wordpress-${ENVIRONMENT}/\$WP_POD:/tmp/unit-tests.php
-      sudo kubectl exec \$WP_POD -n wordpress-${ENVIRONMENT} -- php /tmp/unit-tests.php
-      '"
-    
-    # Security scan
-    - echo "Running security scan..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      echo \"Checking for exposed sensitive endpoints...\"
-      ADMIN_EXPOSED=\$(curl -s -o /dev/null -w \"%{http_code}\" http://$MASTER_IP.nip.io/wp-admin/install.php)
-      if [ \"\$ADMIN_EXPOSED\" == \"200\" ] || [ \"\$ADMIN_EXPOSED\" == \"302\" ]; then
-        echo \"⚠️ Warning: WordPress installation page might be accessible\"
-      else
-        echo \"✅ WordPress installation page properly secured\"
-      fi
-      
-      echo \"Checking WordPress version disclosure...\"
-      VERSION_CHECK=\$(curl -s http://$MASTER_IP.nip.io | grep -c \"meta name=\\\"generator\\\"\" || true)
-      if [ \"\$VERSION_CHECK\" -gt 0 ]; then
-        echo \"⚠️ Warning: WordPress version might be exposed in HTML\"
-      else
-        echo \"✅ WordPress version properly hidden\"
-      fi
-      '"
-    
-    # Performance test
-    - echo "Running basic performance test..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      echo \"Testing response time...\"
-      RESPONSE_TIME=\$(curl -s -w \"Time: %{time_total}s\n\" -o /dev/null http://$MASTER_IP.nip.io)
-      echo \"\$RESPONSE_TIME\"
-      
-      echo \"Testing concurrent connections...\"
-      for i in {1..5}; do
-        curl -s http://$MASTER_IP.nip.io > /dev/null &
-      done
-      wait
-      echo \"Concurrent connection test completed\"
-      '"
-    
-    - echo "QA testing for ${ENVIRONMENT} environment completed at $(date)!"
+  include: 'ci/scripts/qa/qa_dev.yml'
   environment:
     name: $ENVIRONMENT-qa
     url: http://$MASTER_IP.nip.io
   allow_failure: true
 
-# Quality Assurance testing - Prod
 qa:prod:
   stage: qa
   image: $DOCKER_IMAGE
   <<: *prod_environment
   needs:
     - verify:prod
-  before_script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-    - echo "Starting QA tests for ${ENVIRONMENT} environment at $(date)"
-  script:
-    # Run API tests
-    - echo "Running WordPress API tests..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c 'cd ~/$REMOTE_DIR-${ENVIRONMENT} && 
-      ./tests/api-tests.sh $MASTER_IP'"
-    
-    # Run unit tests inside WordPress pod
-    - echo "Running WordPress unit tests..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      WP_POD=\$(sudo kubectl get pod -l app=wordpress,environment=${ENVIRONMENT} -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.items[0].metadata.name}\")
-      echo "Using WordPress pod: \$WP_POD"
-      sudo kubectl cp ~/$REMOTE_DIR-${ENVIRONMENT}/tests/unit-tests.php wordpress-${ENVIRONMENT}/\$WP_POD:/tmp/unit-tests.php
-      sudo kubectl exec \$WP_POD -n wordpress-${ENVIRONMENT} -- php /tmp/unit-tests.php
-      '"
-    
-    # Security scan
-    - echo "Running security scan..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      echo \"Checking for exposed sensitive endpoints...\"
-      ADMIN_EXPOSED=\$(curl -s -o /dev/null -w \"%{http_code}\" http://$MASTER_IP.nip.io/wp-admin/install.php)
-      if [ \"\$ADMIN_EXPOSED\" == \"200\" ] || [ \"\$ADMIN_EXPOSED\" == \"302\" ]; then
-        echo \"⚠️ Warning: WordPress installation page might be accessible\"
-      else
-        echo \"✅ WordPress installation page properly secured\"
-      fi
-      
-      echo \"Checking WordPress version disclosure...\"
-      VERSION_CHECK=\$(curl -s http://$MASTER_IP.nip.io | grep -c \"meta name=\\\"generator\\\"\" || true)
-      if [ \"\$VERSION_CHECK\" -gt 0 ]; then
-        echo \"⚠️ Warning: WordPress version might be exposed in HTML\"
-      else
-        echo \"✅ WordPress version properly hidden\"
-      fi
-      '"
-    
-    # Performance test with higher standards for production
-    - echo "Running comprehensive performance test..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-      echo \"Testing response time...\"
-      RESPONSE_TIME=\$(curl -s -w \"Time: %{time_total}s\n\" -o /dev/null http://$MASTER_IP.nip.io)
-      echo \"\$RESPONSE_TIME\"
-      
-      echo \"Testing concurrent connections (higher load for production)...\"
-      for i in {1..10}; do
-        curl -s http://$MASTER_IP.nip.io > /dev/null &
-      done
-      wait
-      echo \"Concurrent connection test completed\"
-      
-      # Test load balancing between replicas
-      echo \"Testing load balancing between replicas...\"
-      for i in {1..5}; do
-        SERVER_HEADER=\$(curl -s -I http://$MASTER_IP.nip.io | grep -i \"X-Served-By\" || echo \"No server header\")
-        echo \"Request \$i: \$SERVER_HEADER\"
-        sleep 1
-      done
-      '"
-    
-    - echo "QA testing for ${ENVIRONMENT} environment completed at $(date)!"
+  include: 'ci/scripts/qa/qa_prod.yml'
   environment:
     name: $ENVIRONMENT-qa
     url: http://$MASTER_IP.nip.io
   allow_failure: true
 
-# Cleanup dev environment
 cleanup:dev:
   stage: cleanup
   image: $DOCKER_IMAGE
   <<: *dev_environment
-  before_script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-  script:
-    - echo "Starting cleanup process for ${ENVIRONMENT} environment at $(date)..."
-    
-    - echo "Removing all WordPress resources for ${ENVIRONMENT} environment..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-        echo \"Removing ingress resources...\"
-        sudo kubectl delete ingress -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing service resources...\"
-        sudo kubectl delete svc -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing deployment resources...\"
-        sudo kubectl delete deployment -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing statefulset resources...\"
-        sudo kubectl delete statefulset -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing configmap resources...\"
-        sudo kubectl delete configmap -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing secret resources...\"
-        sudo kubectl delete secret -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Waiting for pods to terminate...\"
-        timeout 60 bash -c \"until [ \\\$(sudo kubectl get pods -n wordpress-${ENVIRONMENT} --no-headers | wc -l) -eq 0 ]; do sleep 5; done\" || echo \"Pod termination timed out\"
-        
-        echo \"Removing PVC resources...\"
-        sudo kubectl delete pvc -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing namespace...\"
-        sudo kubectl delete namespace wordpress-${ENVIRONMENT}
-        
-        echo \"Removing local files...\"
-        rm -rf ~/$REMOTE_DIR-${ENVIRONMENT}
-      '"
-    
-    - echo "Cleanup of ${ENVIRONMENT} environment completed at $(date)!"
+  include: 'ci/scripts/cleanup/cleanup_dev.yml'
   environment:
     name: $ENVIRONMENT
     action: stop
   when: manual
 
-# Cleanup prod environment
 cleanup:prod:
   stage: cleanup
   image: $DOCKER_IMAGE
   <<: *prod_environment
-  before_script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-  script:
-    - echo "Starting cleanup process for ${ENVIRONMENT} environment at $(date)..."
-    
-    - echo "Removing all WordPress resources for ${ENVIRONMENT} environment..."
-    - |
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
-        echo \"Removing ingress resources...\"
-        sudo kubectl delete ingress -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing service resources...\"
-        sudo kubectl delete svc -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing deployment resources...\"
-        sudo kubectl delete deployment -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing statefulset resources...\"
-        sudo kubectl delete statefulset -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing configmap resources...\"
-        sudo kubectl delete configmap -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing secret resources...\"
-        sudo kubectl delete secret -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Waiting for pods to terminate...\"
-        timeout 60 bash -c \"until [ \\\$(sudo kubectl get pods -n wordpress-${ENVIRONMENT} --no-headers | wc -l) -eq 0 ]; do sleep 5; done\" || echo \"Pod termination timed out\"
-        
-        echo \"Removing PVC resources...\"
-        sudo kubectl delete pvc -n wordpress-${ENVIRONMENT} --all
-        
-        echo \"Removing namespace...\"
-        sudo kubectl delete namespace wordpress-${ENVIRONMENT}
-        
-        echo \"Removing local files...\"
-        rm -rf ~/$REMOTE_DIR-${ENVIRONMENT}
-      '"
-    
-    - echo "Cleanup of ${ENVIRONMENT} environment completed at $(date)!"
+  include: 'ci/scripts/cleanup/cleanup_prod.yml'
   environment:
     name: $ENVIRONMENT
     action: stop
   when: manual
+

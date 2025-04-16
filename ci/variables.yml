@@ -1,8 +1,0 @@
-SSH_KEY_NAME: "ds_exam_key"
-KUBERNETES_DIR: "kubernetes"
-TERRAFORM_DIR: "terraform"
-REMOTE_DIR: "wordpress"
-WORDPRESS_PORT: "30080"  # NodePort for ingress
-DEPLOYMENT_TIMEOUT: "300"
-MONITORING_DIR: "monitoring"
-PROJECT_IMAGE: "${CI_REGISTRY_IMAGE}/k3s-pipeline:latest" 
