@@ -26,17 +26,6 @@ output "kubeconfig_command" {
   value = module.k3s_cluster.kubeconfig_command
 }
 
-/*
-output "instance_ids" {
-  description = "IDs of EC2 instances"
-  value       = module.ec2.instance_ids
-}
-
-output "instance_public_ips" {
-  description = "Public IPs of EC2 instances"
-  value       = module.ec2.instance_public_ips
-}
-*/
 
 output "wordpress_url" {
   description = "URL to access WordPress"
@@ -45,13 +34,4 @@ output "wordpress_url" {
 
 output "s3_bucket_name" {
   value = aws_s3_bucket.app_data.bucket
-}
-
-output "code_storage_bucket_name" {
-  value = aws_s3_bucket.code_storage.bucket
-}
-
-output "environment" {
-  value = var.environment
-  description = "Current environment"
 }

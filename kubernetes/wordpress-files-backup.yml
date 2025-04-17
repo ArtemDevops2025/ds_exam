@@ -1,0 +1,45 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: wordpress-files-backup
+  namespace: wordpress-${ENVIRONMENT}
+spec:
+  schedule: "0 3 * * *"  # Run daily at 3 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: wordpress-backup
+            image: amazon/aws-cli:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              tar -czf /backup/wordpress-files-$(date +%Y%m%d).tar.gz -C /wordpress .
+              aws s3 cp /backup/wordpress-files-$(date +%Y%m%d).tar.gz s3://$S3_BUCKET/backups/files/
+            env:
+            - name: S3_BUCKET
+              value: "ds-exam-app-data-xotjx8lp"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: access-key
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: secret-key
+            volumeMounts:
+            - name: wordpress-data
+              mountPath: /wordpress
+            - name: backup-volume
+              mountPath: /backup
+          volumes:
+          - name: wordpress-data
+            persistentVolumeClaim:
+              claimName: wp-pv-claim
+          - name: backup-volume
+            emptyDir: {}
+          restartPolicy: OnFailure
