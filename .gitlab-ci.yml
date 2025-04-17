@@ -5,6 +5,7 @@ stages:
   - plan
   - build
   - deploy
+  - backup
   - monitoring
   - verify
   - qa
