@@ -489,7 +489,7 @@ monitoring:
     name: $CI_COMMIT_BRANCH-monitoring
     url: http://$MASTER_IP:30300
 
-:
+verify:prod:
   stage: verify
   image: $DOCKER_IMAGE
   <<: *prod_environment
