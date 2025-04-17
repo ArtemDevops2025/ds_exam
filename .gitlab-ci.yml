@@ -44,8 +44,16 @@ variables:
   DOCKER_IMAGE: "${CI_REGISTRY_IMAGE}/cicd-tools:latest"
   S3_BUCKET_DATA: "ds-exam-app-data-xotjx8lp"
   S3_BUCKET_CODE: "ds-exam-code-storage-253ysdli"
-  ACTIVATE_DEV: "1"
+
+  ACTIVATE_BUILD-IMAGE: "1"
+  ACTIVATE_LINT: "1"
+  ACTIVATE_VALIDATE: "1"
+  ACTIVATE_BUILD: "1"
+  ACTIVATE_MONITORING: "1"
+
+  ACTIVATE_DEV: "0"
   ACTIVATE_PROD: "0"
+
 
 # Environment-specific variables
 .dev_environment: &dev_environment
@@ -87,7 +95,7 @@ build:cicd-image:
   rules:
     - changes:
         - Dockerfile.cicd
-    - if: $CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE == "push" # $CI_COMMIT_BRANCH == "main"
+    - if: $ACTIVATE_BUILD-IMAGE == "1" && $CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE == "push" # $CI_COMMIT_BRANCH == "main"
 #      when: manual
 
 lint:
@@ -96,10 +104,9 @@ lint:
   #include: 'ci/scripts/lint/lint.yml'
   extends: .lint_script_template
   rules:
+    - if: '$ACTIVATE_LINT == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/'
+
     #- if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "dev"
-    - if: $CI_COMMIT_BRANCH == "dev_chris"
     #- if: $CI_COMMIT_BRANCH == "monitoring"
       allow_failure: true
 
@@ -110,9 +117,7 @@ validate:kubernetes:
   extends: .validate_script_kubernetes
   rules:
     # - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "dev"
-    - if: $CI_COMMIT_BRANCH == "dev_chris"
+    - if: '$ACTIVATE_VALIDATE == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/'
     # - if: $CI_COMMIT_BRANCH == "monitoring"
 
 validate:terraform:
@@ -121,6 +126,7 @@ validate:terraform:
   #include: 'ci/scripts/validate/validate_terraform.yml'
   extends: .validate_script_terraform
   rules:
+    - if: '$ACTIVATE_VALIDATE == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/'
   #  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "dev"
@@ -138,6 +144,8 @@ plan_switcher:dev:
     paths:
       - terraform/tfplan
     expire_in: 1 day
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
 
 # Terraform Plan_switcher - Prod
 plan_switcher:prod:
@@ -150,6 +158,8 @@ plan_switcher:prod:
     paths:
       - terraform/tfplan
     expire_in: 1 day
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
 
 build:
   stage: build
@@ -157,9 +167,7 @@ build:
   #include: 'ci/scripts/build/build.yml'
   extends: .build_script
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "dev"
-    - if: $CI_COMMIT_BRANCH == "dev_chris"
+    - if: '$ACTIVATE_BUILD == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/'
   #  - if: $CI_COMMIT_BRANCH == "monitoring"
   artifacts:
     paths:
@@ -195,6 +203,8 @@ deploy:terraform:prod:
     paths:
       - terraform/terraform.env
     expire_in: 1 day
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
   when: manual
 
 deploy:kubernetes:dev:
@@ -213,6 +223,8 @@ deploy:kubernetes:dev:
     paths:
       - $KUBERNETES_DIR/
     expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
 
 deploy:kubernetes:prod:
   stage: deploy
@@ -230,6 +242,8 @@ deploy:kubernetes:prod:
     paths:
       - $KUBERNETES_DIR/
     expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
 
 # Backup Database and Files - Development
 backup:dev:
@@ -244,7 +258,7 @@ backup:dev:
     name: $ENVIRONMENT-backup
     url: http://$MASTER_IP.nip.io
   rules:
-    - if: $CI_COMMIT_BRANCH == "dev"
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
   allow_failure: true
 
 # Backup Database and Files - Production
@@ -260,7 +274,7 @@ backup:prod:
     name: $ENVIRONMENT-backup
     url: http://$MASTER_IP.nip.io
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
   allow_failure: true
 
 monitoring:
@@ -269,9 +283,7 @@ monitoring:
   #include: 'ci/scripts/monitoring/monitoring.yml'
   extends: .monitoring_template
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "dev"
-    - if: $CI_COMMIT_BRANCH == "dev_chris"
+    - if: '$ACTIVATE_MONITORING == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/'
     #- if: $CI_COMMIT_BRANCH == "monitoring"
   needs:
     - job: deploy:kubernetes:dev
@@ -293,6 +305,8 @@ verify:prod:
   environment:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
 
 verify:dev:
   stage: verify
@@ -305,6 +319,8 @@ verify:dev:
   environment:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
 
 qa:dev:
   stage: qa
@@ -318,6 +334,8 @@ qa:dev:
     name: $ENVIRONMENT-qa
     url: http://$MASTER_IP.nip.io
   allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
 
 qa:prod:
   stage: qa
@@ -331,6 +349,8 @@ qa:prod:
     name: $ENVIRONMENT-qa
     url: http://$MASTER_IP.nip.io
   allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
 
 cleanup:dev:
   stage: cleanup
@@ -342,6 +362,8 @@ cleanup:dev:
     name: $ENVIRONMENT
     action: stop
   when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
 
 cleanup:prod:
   stage: cleanup
@@ -352,5 +374,7 @@ cleanup:prod:
   environment:
     name: $ENVIRONMENT
     action: stop
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
   when: manual
 
