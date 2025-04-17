@@ -44,6 +44,8 @@ variables:
   DOCKER_IMAGE: "${CI_REGISTRY_IMAGE}/cicd-tools:latest"
   S3_BUCKET_DATA: "ds-exam-app-data-xotjx8lp"
   S3_BUCKET_CODE: "ds-exam-code-storage-253ysdli"
+  ACTIVATE_DEV: "1"
+  ACTIVATE_PROD: "0"
 
 # Environment-specific variables
 .dev_environment: &dev_environment
@@ -177,11 +179,9 @@ deploy:terraform:dev:
       - terraform/terraform.env
     expire_in: 1 day
   rules:
-    #- if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "dev"
-    - if: $CI_COMMIT_BRANCH == "dev_chris"
-    #- if: $CI_COMMIT_BRANCH == "monitoring"
+    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
+    #- if: $CI_PIPELINE_SOURCE == "merge_request_event" && $ACTIVATE_DEV == "1"
+    #- if: $CI_COMMIT_BRANCH == "monitoring" && $ACTIVATE_DEV == "1"
 
 deploy:terraform:prod:
   stage: deploy
