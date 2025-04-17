@@ -1,0 +1,15 @@
+.validate_script_kubernetes:
+  script:
+    - echo "Validating Kubernetes manifest templates..."
+    - |
+      for file in $KUBERNETES_DIR/templates/*.yaml.tpl; do
+        echo "Checking $file"
+        grep -q "apiVersion:" $file || (echo "Missing apiVersion in $file" && exit 1)
+        grep -q "kind:" $file || (echo "Missing kind in $file" && exit 1)
+        grep -q "metadata:" $file || (echo "Missing metadata in $file" && exit 1)
+        if grep -q "kind: Deployment" $file; then
+          grep -q "replicas:" $file || echo "Warning: No replicas specified in Deployment $file"
+          grep -q "resources:" $file || echo "Warning: No resource limits/requests in Deployment $file"
+        fi
+      done
+    - echo "All Kubernetes manifest templates are valid!"

@@ -1,0 +1,44 @@
+.cleanup_prod_script:
+  before_script:
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+  script:
+  - echo "Starting cleanup process for ${ENVIRONMENT} environment at $(date)..."
+  
+  - echo "Removing all WordPress resources for ${ENVIRONMENT} environment..."
+  - |
+    ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+      echo \"Removing ingress resources...\"
+      sudo kubectl delete ingress -n wordpress-${ENVIRONMENT} --all
+      
+      echo \"Removing service resources...\"
+      sudo kubectl delete svc -n wordpress-${ENVIRONMENT} --all
+      
+      echo \"Removing deployment resources...\"
+      sudo kubectl delete deployment -n wordpress-${ENVIRONMENT} --all
+      
+      echo \"Removing statefulset resources...\"
+      sudo kubectl delete statefulset -n wordpress-${ENVIRONMENT} --all
+      
+      echo \"Removing configmap resources...\"
+      sudo kubectl delete configmap -n wordpress-${ENVIRONMENT} --all
+      
+      echo \"Removing secret resources...\"
+      sudo kubectl delete secret -n wordpress-${ENVIRONMENT} --all
+      
+      echo \"Waiting for pods to terminate...\"
+      timeout 60 bash -c \"until [ \\\$(sudo kubectl get pods -n wordpress-${ENVIRONMENT} --no-headers | wc -l) -eq 0 ]; do sleep 5; done\" || echo \"Pod termination timed out\"
+      
+      echo \"Removing PVC resources...\"
+      sudo kubectl delete pvc -n wordpress-${ENVIRONMENT} --all
+      
+      echo \"Removing namespace...\"
+      sudo kubectl delete namespace wordpress-${ENVIRONMENT}
+      
+      echo \"Removing local files...\"
+      rm -rf ~/$REMOTE_DIR-${ENVIRONMENT}
+    '"
+  
+  - echo "Cleanup of ${ENVIRONMENT} environment completed at $(date)!"
