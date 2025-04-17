@@ -1,0 +1,110 @@
+.backup_dev_script:
+  before_script:
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - echo "Starting backups for ${ENVIRONMENT} environment at $(date)"
+  script:
+    - echo "Backing up MySQL database..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+        # Ensure backup directory exists
+        mkdir -p ~/backups
+        
+        # Get MySQL pod name
+        MYSQL_POD=\$(sudo kubectl get pod -l tier=mysql -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.items[0].metadata.name}\")
+        echo \"Using MySQL pod: \$MYSQL_POD\"
+        
+        # Get MySQL password from secret
+        MYSQL_PASSWORD=\$(sudo kubectl get secret mysql-pass -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.data.password}\" | base64 --decode)
+        
+        # Create database backup
+        BACKUP_FILE=\"wordpress-db-${ENVIRONMENT}-\$(date +%Y%m%d-%H%M%S).sql.gz\"
+        echo \"Creating database backup: \$BACKUP_FILE\"
+        sudo kubectl exec \$MYSQL_POD -n wordpress-${ENVIRONMENT} -- bash -c \"mysqldump -u wordpress -p\$MYSQL_PASSWORD wordpress | gzip > /tmp/\$BACKUP_FILE\"
+        
+        # Copy backup from pod
+        sudo kubectl cp wordpress-${ENVIRONMENT}/\$MYSQL_POD:/tmp/\$BACKUP_FILE ~/backups/\$BACKUP_FILE
+        
+        # Upload backup to S3
+        export AWS_ACCESS_KEY_ID=\"$AWS_ACCESS_KEY_ID\"
+        export AWS_SECRET_ACCESS_KEY=\"$AWS_SECRET_ACCESS_KEY\"
+        aws s3 cp ~/backups/\$BACKUP_FILE s3://${S3_BUCKET_DATA}/backups/databases/\$BACKUP_FILE
+        
+        echo \"Database backup uploaded to S3: s3://${S3_BUCKET_DATA}/backups/databases/\$BACKUP_FILE\"
+      '"
+    
+    - echo "Backing up WordPress files..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+        # Get WordPress pod name
+        WP_POD=\$(sudo kubectl get pod -l app=wordpress,environment=${ENVIRONMENT} -n wordpress-${ENVIRONMENT} -o jsonpath=\"{.items[0].metadata.name}\")
+        echo \"Using WordPress pod: \$WP_POD\"
+        
+        # Create WordPress files backup
+        BACKUP_FILE=\"wordpress-files-${ENVIRONMENT}-\$(date +%Y%m%d-%H%M%S).tar.gz\"
+        echo \"Creating files backup: \$BACKUP_FILE\"
+        
+        # Create backup inside pod
+        sudo kubectl exec \$WP_POD -n wordpress-${ENVIRONMENT} -- bash -c \"cd /var/www/html && tar -czf /tmp/\$BACKUP_FILE wp-content\"
+        
+        # Copy backup from pod
+        sudo kubectl cp wordpress-${ENVIRONMENT}/\$WP_POD:/tmp/\$BACKUP_FILE ~/backups/\$BACKUP_FILE
+        
+        # Upload backup to S3
+        export AWS_ACCESS_KEY_ID=\"$AWS_ACCESS_KEY_ID\"
+        export AWS_SECRET_ACCESS_KEY=\"$AWS_SECRET_ACCESS_KEY\"
+        aws s3 cp ~/backups/\$BACKUP_FILE s3://${S3_BUCKET_DATA}/backups/files/\$BACKUP_FILE
+        
+        echo \"Files backup uploaded to S3: s3://${S3_BUCKET_DATA}/backups/files/\$BACKUP_FILE\"
+        
+        # Backup Terraform state
+        ./backup-terraform-state.sh
+      '"
+    
+    - echo "Running backup verification..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+        export AWS_ACCESS_KEY_ID=\"$AWS_ACCESS_KEY_ID\"
+        export AWS_SECRET_ACCESS_KEY=\"$AWS_SECRET_ACCESS_KEY\"
+        
+        echo \"Verifying database backups...\"
+        DB_BACKUPS=\$(aws s3 ls s3://${S3_BUCKET_DATA}/backups/databases/ --recursive | grep wordpress-db-${ENVIRONMENT} | sort | tail -n 5)
+        if [ -z \"\$DB_BACKUPS\" ]; then
+          echo \"❌ No database backups found!\"
+          exit 1
+        else
+          echo \"✅ Recent database backups:\"
+          echo \"\$DB_BACKUPS\"
+        fi
+        
+        echo \"Verifying file backups...\"
+        FILE_BACKUPS=\$(aws s3 ls s3://${S3_BUCKET_DATA}/backups/files/ --recursive | grep wordpress-files-${ENVIRONMENT} | sort | tail -n 5)
+        if [ -z \"\$FILE_BACKUPS\" ]; then
+          echo \"❌ No file backups found!\"
+          exit 1
+        else
+          echo \"✅ Recent file backups:\"
+          echo \"\$FILE_BACKUPS\"
+        fi
+        
+        # Check backup freshness
+        LATEST_DB_BACKUP=\$(aws s3 ls s3://${S3_BUCKET_DATA}/backups/databases/ --recursive | grep wordpress-db-${ENVIRONMENT} | sort | tail -n 1)
+        BACKUP_DATE=\$(echo \$LATEST_DB_BACKUP | awk \"{print \\\$1, \\\$2}\")
+        CURRENT_DATE=\$(date -u +\"%Y-%m-%d %H:%M:%S\")
+        echo \"Latest backup date: \$BACKUP_DATE\"
+        echo \"Current date: \$CURRENT_DATE\"
+        
+        # Print backup status report
+        echo \"======================================\"
+        echo \"Backup Status Report - ${ENVIRONMENT}\"
+        echo \"======================================\"
+        echo \"Total Database Backups: \$(aws s3 ls s3://${S3_BUCKET_DATA}/backups/databases/ --recursive | grep wordpress-db-${ENVIRONMENT} | wc -l)\"
+        echo \"Total File Backups: \$(aws s3 ls s3://${S3_BUCKET_DATA}/backups/files/ --recursive | grep wordpress-files-${ENVIRONMENT} | wc -l)\"
+        echo \"Latest Database Backup: \$(aws s3 ls s3://${S3_BUCKET_DATA}/backups/databases/ --recursive | grep wordpress-db-${ENVIRONMENT} | sort | tail -n 1)\"
+        echo \"Latest File Backup: \$(aws s3 ls s3://${S3_BUCKET_DATA}/backups/files/ --recursive | grep wordpress-files-${ENVIRONMENT} | sort | tail -n 1)\"
+        echo \"======================================\"
+      '"
+    
+    - echo "Backup and verification for ${ENVIRONMENT} environment completed at $(date)!"
