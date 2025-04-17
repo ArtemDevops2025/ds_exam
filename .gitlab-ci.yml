@@ -46,7 +46,7 @@ variables:
   S3_BUCKET_CODE: "ds-exam-code-storage-253ysdli"
 
   # Choos running Jobs
-  ACTIVATE_BUILD-IMAGE: "0"
+  ACTIVATE_BUILD_IMAGE: "0"
   ACTIVATE_LINT: "1"
   ACTIVATE_VALIDATE: "1"
   ACTIVATE_BUILD: "1"
@@ -96,7 +96,7 @@ build:cicd-image:
   rules:
     - changes:
         - Dockerfile.cicd
-    - if: $ACTIVATE_BUILD-IMAGE == "1" && $CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE == "push" # $CI_COMMIT_BRANCH == "main"
+    - if: $ACTIVATE_BUILD_IMAGE == "1" && $CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE == "push" # $CI_COMMIT_BRANCH == "main"
 #      when: manual
 
 lint:
