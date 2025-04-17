@@ -176,6 +176,12 @@ deploy:terraform:dev:
     paths:
       - terraform/terraform.env
     expire_in: 1 day
+  rules:
+    #- if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "dev"
+    - if: $CI_COMMIT_BRANCH == "dev_chris"
+    #- if: $CI_COMMIT_BRANCH == "monitoring"
 
 deploy:terraform:prod:
   stage: deploy
@@ -256,8 +262,6 @@ backup:prod:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   allow_failure: true
-
-
 
 monitoring:
   stage: monitoring
