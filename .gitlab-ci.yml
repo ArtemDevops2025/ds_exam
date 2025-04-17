@@ -125,8 +125,8 @@ validate:terraform:
     - if: $CI_COMMIT_BRANCH == "dev"
   #  - if: $CI_COMMIT_BRANCH == "monitoring"
 
-# Terraform Plan - Dev
-plan:dev:
+# Terraform Plan_switcher - Dev
+plan_switcher:dev:
   stage: plan
   image: $DOCKER_IMAGE
   <<: *dev_environment
@@ -142,8 +142,8 @@ plan:dev:
       - terraform/tfplan
     expire_in: 1 day
 
-# Terraform Plan - Prod
-plan:prod:
+# Terraform Plan_switcher - Prod
+plan_switcher:prod:
   stage: plan
   image: $DOCKER_IMAGE
   <<: *prod_environment
