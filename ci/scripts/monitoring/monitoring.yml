@@ -2,52 +2,46 @@
 
 .monitoring_template: # Neuer, eindeutiger Template-Name
   before_script:
-    # ... (before_script bleibt unverändert wie in der vorherigen Antwort) ...
+    # --- before_script bleibt wie in der vorherigen funktionierenden Version ---
     - |
       set -e
       echo "--- Monitoring Job: Setting up SSH and Environment ---"
-      # ... (Rest des before_script) ...
+      # ... (Rest des before_script, das die MASTER_IP findet und ~/.ssh/config erstellt) ...
+      # Die ~/.ssh/config ist immer noch nützlich für User und IdentityFile!
       echo "-----------------------------------------------------"
 
   script:
-    # Create remote directories using the specific key
+    # Verwende explizite Optionen bei ssh und scp
     - echo "Creating remote directories for monitoring..."
-    - ssh ubuntu@$MASTER_IP "mkdir -p ~/$MONITORING_DIR/prometheus ~/$MONITORING_DIR/grafana"
+    - ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$MASTER_IP "mkdir -p ~/$MONITORING_DIR/prometheus ~/$MONITORING_DIR/grafana"
 
-    # Transfer monitoring YAML files using the specific key
+    # Transfer monitoring YAML files using explicit options
     - echo "Transferring monitoring manifests..."
-    - scp $KUBERNETES_DIR/monitoring/monitoring-namespace.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/
-    - scp $KUBERNETES_DIR/monitoring/prometheus/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/prometheus/
-    - scp $KUBERNETES_DIR/monitoring/grafana/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/grafana/
+    - scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $KUBERNETES_DIR/monitoring/monitoring-namespace.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/
+    - scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $KUBERNETES_DIR/monitoring/prometheus/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/prometheus/
+    - scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $KUBERNETES_DIR/monitoring/grafana/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/grafana/
 
-    # Apply Kubernetes manifests via SSH using the specific key
+    # Apply Kubernetes manifests via SSH using explicit options
     - echo "Applying monitoring manifests..."
     - |
-      ssh ubuntu@$MASTER_IP "bash -l -c '
+      ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$MASTER_IP "bash -l -c '
         set -e # Fail fast within the remote script
         echo \"--- Applying Kubernetes Monitoring Manifests --- \"
 
         echo \"Applying Namespace...\"
         sudo kubectl apply -f ~/$MONITORING_DIR/monitoring-namespace.yaml
 
-        # --- START: Fix für ConfigMap Patch-Problem ---
         echo \"Deleting existing Prometheus ConfigMap to ensure clean apply...\"
-        # Lösche die ConfigMap, ignoriere Fehler, wenn sie nicht existiert
         sudo kubectl delete configmap prometheus-config -n monitoring --ignore-not-found=true
-
         echo \"Deleting existing Grafana Datasource ConfigMap to ensure clean apply...\"
-        # Vorsichtshalber auch für Grafana, falls ähnliche Probleme auftreten
         sudo kubectl delete configmap grafana-datasources -n monitoring --ignore-not-found=true
         echo \"Deleting existing Grafana Secret...\"
         sudo kubectl delete secret grafana-admin-credentials -n monitoring --ignore-not-found=true
-        # --- END: Fix für ConfigMap Patch-Problem ---
 
         echo \"Applying Prometheus components...\"
-        # Jetzt sollte apply für das Verzeichnis funktionieren, da die ConfigMap neu erstellt wird
         sudo kubectl apply -f ~/$MONITORING_DIR/prometheus/
 
         echo \"Applying Grafana components...\"
-        # Jetzt sollte apply für das Verzeichnis funktionieren, da die ConfigMap/Secret neu erstellt wird
         sudo kubectl apply -f ~/$MONITORING_DIR/grafana/
 
         echo \"Waiting for Prometheus deployment to complete (timeout 180s)...\"
@@ -57,7 +51,7 @@
             sudo kubectl get pods -n monitoring -l app=prometheus -o wide
             echo \"Checking deployment events:\"
             sudo kubectl describe deployment prometheus-deployment -n monitoring
-            # exit 1 # Optional: Job fehlschlagen lassen
+            # exit 1
         else
             echo \"Prometheus deployment successful.\"
         fi
@@ -69,7 +63,7 @@
             sudo kubectl get pods -n monitoring -l app=grafana -o wide
             echo \"Checking deployment events:\"
             sudo kubectl describe deployment grafana-deployment -n monitoring
-            # exit 1 # Optional: Job fehlschlagen lassen
+            # exit 1
         else
             echo \"Grafana deployment successful.\"
         fi
