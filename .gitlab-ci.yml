@@ -296,7 +296,7 @@ monitoring:general:
     name: $CI_COMMIT_BRANCH-monitoring
     url: http://$MASTER_IP:30300
 
-monitoring:grafana_prometheus:
+monitoring:graf_prom:
   stage: monitoring
   image: $DOCKER_IMAGE
   #include: 'ci/scripts/monitoring/monitoring.yml'
