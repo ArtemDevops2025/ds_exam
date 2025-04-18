@@ -19,6 +19,7 @@ include:
   - local: 'ci/scripts/qa/qa_prod.yml'
   - local: 'ci/scripts/cleanup/cleanup_dev.yml'
   - local: 'ci/scripts/cleanup/cleanup_prod.yml'
+  - local: 'ci/scripts/monitoring/monitoring_graf_pro.yml'
   
 
 stages:
@@ -278,7 +279,7 @@ backup:prod:
     - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
   allow_failure: true
 
-monitoring:
+monitoring:general:
   stage: monitoring
   image: $DOCKER_IMAGE
   #include: 'ci/scripts/monitoring/monitoring.yml'
@@ -294,6 +295,26 @@ monitoring:
   environment:
     name: $CI_COMMIT_BRANCH-monitoring
     url: http://$MASTER_IP:30300
+
+monitoring:grafana_prometheus:
+  stage: monitoring
+  image: $DOCKER_IMAGE
+  #include: 'ci/scripts/monitoring/monitoring.yml'
+  extends: .monitoring_graf_pro_template
+  rules:
+    - if: '$ACTIVATE_MONITORING == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/'
+    #- if: $CI_COMMIT_BRANCH == "monitoring"
+  needs:
+    - job: deploy:kubernetes:dev
+      optional: true
+      artifacts: true # Needed to potentially get MASTER_IP from terraform.env
+    - job: deploy:kubernetes:prod
+      optional: true
+      artifacts: true # Needed to potentially get MASTER_IP from terraform.env
+  environment:
+    name: $CI_COMMIT_BRANCH-monitoring
+    url: http://$MASTER_IP:30300
+
 
 verify:prod:
   stage: verify

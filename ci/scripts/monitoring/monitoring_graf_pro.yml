@@ -1,0 +1,63 @@
+.monitoring_graf_pro_template:
+  before_script:
+    - mkdir -p ~/.ssh
+    # Ensure SSH_PRIVATE_KEY is correctly set in GitLab CI/CD variables
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/$SSH_KEY_NAME.pem
+    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
+    # Ensure MASTER_IP is available (e.g., from deploy:terraform job artifacts)
+    - |
+      if [ -z "$MASTER_IP" ]; then
+        echo "MASTER_IP is not set. It should be passed from a previous Terraform stage."
+        # Attempt to read from previous stage artifact if exists
+        if [ -f "terraform/terraform.env" ]; then
+          echo "Attempting to source MASTER_IP from terraform.env"
+          source terraform/terraform.env
+        fi
+        if [ -z "$MASTER_IP" ]; then
+           echo "Error: MASTER_IP could not be determined."
+           exit 1
+        fi
+      fi
+    - echo "Using MASTER_IP: $MASTER_IP for monitoring deployment."
+    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n\tUser ubuntu" > ~/.ssh/config
+  script:
+    # Create remote directories
+    - echo "Creating remote directories for monitoring..."
+    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$MONITORING_DIR/prometheus ~/$MONITORING_DIR/grafana"
+
+    # Transfer monitoring YAML files
+    - echo "Transferring monitoring manifests..."
+    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/monitoring-namespace.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/
+    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/prometheus/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/prometheus/
+    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/grafana/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/grafana/
+
+    # Apply Kubernetes manifests
+    - echo "Applying monitoring manifests..."
+    - |
+      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "bash -l -c '
+        echo \"Applying Namespace...\"
+        sudo kubectl apply -f ~/$MONITORING_DIR/monitoring-namespace.yaml
+
+        echo \"Applying Prometheus components...\"
+        sudo kubectl apply -f ~/$MONITORING_DIR/prometheus/
+
+        echo \"Applying Grafana components...\"
+        sudo kubectl apply -f ~/$MONITORING_DIR/grafana/
+
+        echo \"Waiting for Prometheus deployment to complete...\"
+        if ! sudo kubectl rollout status deployment/prometheus-deployment -n monitoring --timeout=180s; then
+            echo \"Prometheus deployment failed to complete.\"
+            sudo kubectl get pods -n monitoring -l app=prometheus
+            # exit 1 # Optional: fail the job
+        fi
+
+        echo \"Waiting for Grafana deployment to complete...\"
+        if ! sudo kubectl rollout status deployment/grafana-deployment -n monitoring --timeout=180s; then
+            echo \"Grafana deployment failed to complete.\"
+            sudo kubectl get pods -n monitoring -l app=grafana
+            # exit 1 # Optional: fail the job
+        fi
+
+        echo \"Monitoring stack deployment initiated. Checking status:\"
+        sudo kubectl get all -n monitoring
+      '"
