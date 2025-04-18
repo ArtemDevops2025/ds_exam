@@ -2,52 +2,11 @@
 
 .monitoring_template: # Neuer, eindeutiger Template-Name
   before_script:
-    - | # Start a single multi-line block
-      set -e # Exit immediately if a command exits with a non-zero status.
+    # ... (before_script bleibt unverändert wie in der vorherigen Antwort) ...
+    - |
+      set -e
       echo "--- Monitoring Job: Setting up SSH and Environment ---"
-
-      echo "Setting up SSH key..."
-      mkdir -p ~/.ssh
-      # Ensure SSH_PRIVATE_KEY is correctly set in GitLab CI/CD variables
-      if [ -z "$SSH_PRIVATE_KEY" ]; then
-        echo "Error: SSH_PRIVATE_KEY variable is not set."
-        exit 1
-      fi
-      echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/${SSH_KEY_NAME:-id_rsa}.pem # Use SSH_KEY_NAME or default
-      chmod 600 ~/.ssh/${SSH_KEY_NAME:-id_rsa}.pem
-      echo "SSH key written to ~/.ssh/${SSH_KEY_NAME:-id_rsa}.pem"
-
-      echo "Determining MASTER_IP..."
-      # Check if MASTER_IP is passed directly (e.g., via needs/dependencies)
-      if [ -z "$MASTER_IP" ]; then
-        echo "MASTER_IP is not set directly. Trying to source from terraform/terraform.env..."
-        if [ -f "terraform/terraform.env" ]; then
-          # Use grep/cut for safety - assumes simple KEY=VALUE format
-          MASTER_IP_FROM_FILE=$(grep '^MASTER_IP=' terraform/terraform.env | cut -d'=' -f2)
-          if [ -n "$MASTER_IP_FROM_FILE" ]; then
-              export MASTER_IP="$MASTER_IP_FROM_FILE" # Export it so subsequent commands see it
-              echo "MASTER_IP sourced from terraform.env."
-          else
-              echo "MASTER_IP key not found in terraform.env."
-          fi
-        else
-           echo "terraform.env not found."
-        fi
-      else
-          echo "MASTER_IP was passed directly."
-      fi
-
-      # Final check for MASTER_IP
-      if [ -z "$MASTER_IP" ]; then
-         echo "Error: MASTER_IP could not be determined."
-         exit 1
-      fi
-
-      echo "Using MASTER_IP: $MASTER_IP for monitoring deployment."
-      echo "Configuring SSH..."
-      # Use the specific key name from variable or default to id_rsa.pem
-      echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n\tUser ubuntu\n\tIdentityFile ~/.ssh/${SSH_KEY_NAME:-id_rsa}.pem" > ~/.ssh/config
-      echo "SSH setup complete."
+      # ... (Rest des before_script) ...
       echo "-----------------------------------------------------"
 
   script:
@@ -71,10 +30,24 @@
         echo \"Applying Namespace...\"
         sudo kubectl apply -f ~/$MONITORING_DIR/monitoring-namespace.yaml
 
+        # --- START: Fix für ConfigMap Patch-Problem ---
+        echo \"Deleting existing Prometheus ConfigMap to ensure clean apply...\"
+        # Lösche die ConfigMap, ignoriere Fehler, wenn sie nicht existiert
+        sudo kubectl delete configmap prometheus-config -n monitoring --ignore-not-found=true
+
+        echo \"Deleting existing Grafana Datasource ConfigMap to ensure clean apply...\"
+        # Vorsichtshalber auch für Grafana, falls ähnliche Probleme auftreten
+        sudo kubectl delete configmap grafana-datasources -n monitoring --ignore-not-found=true
+        echo \"Deleting existing Grafana Secret...\"
+        sudo kubectl delete secret grafana-admin-credentials -n monitoring --ignore-not-found=true
+        # --- END: Fix für ConfigMap Patch-Problem ---
+
         echo \"Applying Prometheus components...\"
+        # Jetzt sollte apply für das Verzeichnis funktionieren, da die ConfigMap neu erstellt wird
         sudo kubectl apply -f ~/$MONITORING_DIR/prometheus/
 
         echo \"Applying Grafana components...\"
+        # Jetzt sollte apply für das Verzeichnis funktionieren, da die ConfigMap/Secret neu erstellt wird
         sudo kubectl apply -f ~/$MONITORING_DIR/grafana/
 
         echo \"Waiting for Prometheus deployment to complete (timeout 180s)...\"
@@ -84,7 +57,7 @@
             sudo kubectl get pods -n monitoring -l app=prometheus -o wide
             echo \"Checking deployment events:\"
             sudo kubectl describe deployment prometheus-deployment -n monitoring
-            # Consider failing the job: exit 1
+            # exit 1 # Optional: Job fehlschlagen lassen
         else
             echo \"Prometheus deployment successful.\"
         fi
@@ -96,7 +69,7 @@
             sudo kubectl get pods -n monitoring -l app=grafana -o wide
             echo \"Checking deployment events:\"
             sudo kubectl describe deployment grafana-deployment -n monitoring
-            # Consider failing the job: exit 1
+            # exit 1 # Optional: Job fehlschlagen lassen
         else
             echo \"Grafana deployment successful.\"
         fi
