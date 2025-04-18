@@ -1,22 +1,108 @@
-.monitoring_template:
+# ci/scripts/monitoring/monitoring.yml
+
+.monitoring_combined_template: # Neuer, eindeutiger Template-Name
   before_script:
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_KEY_NAME.pem
-    - chmod 600 ~/.ssh/$SSH_KEY_NAME.pem
-    - echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+    - | # Start a single multi-line block
+      set -e # Exit immediately if a command exits with a non-zero status.
+      echo "--- Monitoring Job: Setting up SSH and Environment ---"
+
+      echo "Setting up SSH key..."
+      mkdir -p ~/.ssh
+      # Ensure SSH_PRIVATE_KEY is correctly set in GitLab CI/CD variables
+      if [ -z "$SSH_PRIVATE_KEY" ]; then
+        echo "Error: SSH_PRIVATE_KEY variable is not set."
+        exit 1
+      fi
+      echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/${SSH_KEY_NAME:-id_rsa}.pem # Use SSH_KEY_NAME or default
+      chmod 600 ~/.ssh/${SSH_KEY_NAME:-id_rsa}.pem
+      echo "SSH key written to ~/.ssh/${SSH_KEY_NAME:-id_rsa}.pem"
+
+      echo "Determining MASTER_IP..."
+      # Check if MASTER_IP is passed directly (e.g., via needs/dependencies)
+      if [ -z "$MASTER_IP" ]; then
+        echo "MASTER_IP is not set directly. Trying to source from terraform/terraform.env..."
+        if [ -f "terraform/terraform.env" ]; then
+          # Use grep/cut for safety - assumes simple KEY=VALUE format
+          MASTER_IP_FROM_FILE=$(grep '^MASTER_IP=' terraform/terraform.env | cut -d'=' -f2)
+          if [ -n "$MASTER_IP_FROM_FILE" ]; then
+              export MASTER_IP="$MASTER_IP_FROM_FILE" # Export it so subsequent commands see it
+              echo "MASTER_IP sourced from terraform.env."
+          else
+              echo "MASTER_IP key not found in terraform.env."
+          fi
+        else
+           echo "terraform.env not found."
+        fi
+      else
+          echo "MASTER_IP was passed directly."
+      fi
+
+      # Final check for MASTER_IP
+      if [ -z "$MASTER_IP" ]; then
+         echo "Error: MASTER_IP could not be determined."
+         exit 1
+      fi
+
+      echo "Using MASTER_IP: $MASTER_IP for monitoring deployment."
+      echo "Configuring SSH..."
+      # Use the specific key name from variable or default to id_rsa.pem
+      echo -e "Host $MASTER_IP\n\tStrictHostKeyChecking no\n\tUser ubuntu\n\tIdentityFile ~/.ssh/${SSH_KEY_NAME:-id_rsa}.pem" > ~/.ssh/config
+      echo "SSH setup complete."
+      echo "-----------------------------------------------------"
+
   script:
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "mkdir -p ~/$MONITORING_DIR/prometheus ~/$MONITORING_DIR/grafana"
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/monitoring-namespace.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/prometheus/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/prometheus/
-    - scp -i ~/.ssh/$SSH_KEY_NAME.pem $KUBERNETES_DIR/monitoring/grafana/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/grafana/
-    - >
-      ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "
-        sudo kubectl apply -f ~/$MONITORING_DIR/monitoring-namespace.yaml &&
-        sudo kubectl apply -f ~/$MONITORING_DIR/prometheus/ &&
-        sudo kubectl apply -f ~/$MONITORING_DIR/grafana/ &&
-        timeout 120 bash -c 'until sudo kubectl get pods -n monitoring -l app=prometheus -o jsonpath=\"{.items[0].status.phase}\" | grep -q Running; do sleep 5; done' ||
-        echo 'Prometheus timed out' &&
-        timeout 120 bash -c 'until sudo kubectl get pods -n monitoring -l app=grafana -o jsonpath=\"{.items[0].status.phase}\" | grep -q Running; do sleep 5; done' ||
-        echo 'Grafana timed out'
-      "
-    - ssh -i ~/.ssh/$SSH_KEY_NAME.pem ubuntu@$MASTER_IP "sudo kubectl get all -n monitoring"
+    # Create remote directories using the specific key
+    - echo "Creating remote directories for monitoring..."
+    - ssh ubuntu@$MASTER_IP "mkdir -p ~/$MONITORING_DIR/prometheus ~/$MONITORING_DIR/grafana"
+
+    # Transfer monitoring YAML files using the specific key
+    - echo "Transferring monitoring manifests..."
+    - scp $KUBERNETES_DIR/monitoring/monitoring-namespace.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/
+    - scp $KUBERNETES_DIR/monitoring/prometheus/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/prometheus/
+    - scp $KUBERNETES_DIR/monitoring/grafana/*.yaml ubuntu@$MASTER_IP:~/$MONITORING_DIR/grafana/
+
+    # Apply Kubernetes manifests via SSH using the specific key
+    - echo "Applying monitoring manifests..."
+    - |
+      ssh ubuntu@$MASTER_IP "bash -l -c '
+        set -e # Fail fast within the remote script
+        echo \"--- Applying Kubernetes Monitoring Manifests --- \"
+
+        echo \"Applying Namespace...\"
+        sudo kubectl apply -f ~/$MONITORING_DIR/monitoring-namespace.yaml
+
+        echo \"Applying Prometheus components...\"
+        sudo kubectl apply -f ~/$MONITORING_DIR/prometheus/
+
+        echo \"Applying Grafana components...\"
+        sudo kubectl apply -f ~/$MONITORING_DIR/grafana/
+
+        echo \"Waiting for Prometheus deployment to complete (timeout 180s)...\"
+        if ! sudo kubectl rollout status deployment/prometheus-deployment -n monitoring --timeout=180s; then
+            echo \"Prometheus deployment failed to complete within timeout.\"
+            echo \"Checking pod status:\"
+            sudo kubectl get pods -n monitoring -l app=prometheus -o wide
+            echo \"Checking deployment events:\"
+            sudo kubectl describe deployment prometheus-deployment -n monitoring
+            # Consider failing the job: exit 1
+        else
+            echo \"Prometheus deployment successful.\"
+        fi
+
+        echo \"Waiting for Grafana deployment to complete (timeout 180s)...\"
+        if ! sudo kubectl rollout status deployment/grafana-deployment -n monitoring --timeout=180s; then
+            echo \"Grafana deployment failed to complete within timeout.\"
+            echo \"Checking pod status:\"
+            sudo kubectl get pods -n monitoring -l app=grafana -o wide
+            echo \"Checking deployment events:\"
+            sudo kubectl describe deployment grafana-deployment -n monitoring
+            # Consider failing the job: exit 1
+        else
+            echo \"Grafana deployment successful.\"
+        fi
+
+        echo \"---------------------------------------------------\"
+        echo \"Monitoring stack deployment initiated. Final status:\"
+        sudo kubectl get all -n monitoring
+        echo \"---------------------------------------------------\"
+      '"

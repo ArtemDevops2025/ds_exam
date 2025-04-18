@@ -292,28 +292,35 @@ monitoring:general:
       optional: true
     - job: deploy:kubernetes:prod
       optional: true
+    
+    - job: deploy:terraform:dev # Abhängig von Terraform dev
+      artifacts: true
+      optional: true # Läuft auch, wenn dev TF fehlschlägt/nicht läuft
+    - job: deploy:terraform:prod # Abhängig von Terraform prod
+      artifacts: true
+      optional: true # Läuft auch, wenn prod TF fehlschlägt/nicht läuft
   environment:
     name: $CI_COMMIT_BRANCH-monitoring
     url: http://$MASTER_IP:30300
 
-monitoring:graf_prom:
-  stage: monitoring
-  image: $DOCKER_IMAGE
-  #include: 'ci/scripts/monitoring/monitoring.yml'
-  extends: .monitoring_graf_pro_template
-  rules:
-    - if: '$ACTIVATE_MONITORING == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/'
-    #- if: $CI_COMMIT_BRANCH == "monitoring"
-  needs:
-    - job: deploy:kubernetes:dev
-      optional: true
-      artifacts: true # Needed to potentially get MASTER_IP from terraform.env
-    - job: deploy:kubernetes:prod
-      optional: true
-      artifacts: true # Needed to potentially get MASTER_IP from terraform.env
-  environment:
-    name: $CI_COMMIT_BRANCH-monitoring
-    url: http://$MASTER_IP:30300
+# monitoring:graf_prom:
+#   stage: monitoring
+#   image: $DOCKER_IMAGE
+#   #include: 'ci/scripts/monitoring/monitoring.yml'
+#   extends: .monitoring_graf_pro_template
+#   rules:
+#     - if: '$ACTIVATE_MONITORING == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/'
+#     #- if: $CI_COMMIT_BRANCH == "monitoring"
+#   needs:
+#     - job: deploy:kubernetes:dev
+#       optional: true
+#       artifacts: true # Needed to potentially get MASTER_IP from terraform.env
+#     - job: deploy:kubernetes:prod
+#       optional: true
+#       artifacts: true # Needed to potentially get MASTER_IP from terraform.env
+#   environment:
+#     name: $CI_COMMIT_BRANCH-monitoring
+#     url: http://$MASTER_IP:30300
 
 
 verify:prod:
