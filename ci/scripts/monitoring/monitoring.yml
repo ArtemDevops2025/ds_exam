@@ -1,6 +1,6 @@
 # ci/scripts/monitoring/monitoring.yml
 
-.monitoring_combined_template: # Neuer, eindeutiger Template-Name
+.monitoring_template: # Neuer, eindeutiger Template-Name
   before_script:
     - | # Start a single multi-line block
       set -e # Exit immediately if a command exits with a non-zero status.
