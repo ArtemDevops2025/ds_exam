@@ -45,7 +45,7 @@ variables:
   S3_BUCKET_DATA: "ds-exam-app-data-xotjx8lp"
   S3_BUCKET_CODE: "ds-exam-code-storage-253ysdli"
 
-  # Choos running Jobs
+  # CENTRAL RUNNING JOBS
   ACTIVATE_BUILD_IMAGE: "0"
   ACTIVATE_LINT: "1"
   ACTIVATE_VALIDATE: "1"
