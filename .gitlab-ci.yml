@@ -59,7 +59,7 @@ variables:
   ACTIVATE_QA: "1"
   ACTIVATE_CLEANUP: "1"
 
-  ACTIVATE_DEV: "0"
+  ACTIVATE_DEV: "1"
   ACTIVATE_PROD: "0"
 
 
