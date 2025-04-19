@@ -50,8 +50,14 @@ variables:
   ACTIVATE_BUILD_IMAGE: "0"
   ACTIVATE_LINT: "1"
   ACTIVATE_VALIDATE: "1"
+  ACTIVATE_PLAN: "1"
   ACTIVATE_BUILD: "1"
+  ACTIVATE_DEPLOY: "1"
+  ACTIVATE_BACKUP: "1"
+  ACTIVATE_VERIFY: "1"
   ACTIVATE_MONITORING: "1"
+  ACTIVATE_QA: "1"
+  ACTIVATE_CLEANUP: "1"
 
   ACTIVATE_DEV: "0"
   ACTIVATE_PROD: "0"
@@ -147,7 +153,7 @@ plan_switcher:dev:
       - terraform/tfplan
     expire_in: 1 day
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
+    - if: '$VALIDATE_PLAN == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
 
 # Terraform Plan_switcher - Prod
 plan_switcher:prod:
@@ -161,7 +167,7 @@ plan_switcher:prod:
       - terraform/tfplan
     expire_in: 1 day
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
+    - if: '$VALIDATE_PLAN == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
 
 build:
   stage: build
@@ -189,7 +195,7 @@ deploy:terraform:dev:
       - terraform/terraform.env
     expire_in: 1 day
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
+    - if: '$ACTIVATE_DEPLOY == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
     #- if: $CI_PIPELINE_SOURCE == "merge_request_event" && $ACTIVATE_DEV == "1"
     #- if: $CI_COMMIT_BRANCH == "monitoring" && $ACTIVATE_DEV == "1"
 
@@ -206,7 +212,7 @@ deploy:terraform:prod:
       - terraform/terraform.env
     expire_in: 1 day
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
+    - if: '$ACTIVATE_DEPLOY == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
   when: manual
 
 deploy:kubernetes:dev:
@@ -226,7 +232,7 @@ deploy:kubernetes:dev:
       - $KUBERNETES_DIR/
     expire_in: 1 week
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
+    - if: '$ACTIVATE_DEPLOY == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
 
 deploy:kubernetes:prod:
   stage: deploy
@@ -245,7 +251,7 @@ deploy:kubernetes:prod:
       - $KUBERNETES_DIR/
     expire_in: 1 week
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
+    - if: '$ACTIVATE_DEPLOY == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
 
 # Backup Database and Files - Development
 backup:dev:
@@ -260,7 +266,7 @@ backup:dev:
     name: $ENVIRONMENT-backup
     url: http://$MASTER_IP.nip.io
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
+    - if: '$ACTIVATE_BACKUP == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
   allow_failure: true
 
 # Backup Database and Files - Production
@@ -276,7 +282,7 @@ backup:prod:
     name: $ENVIRONMENT-backup
     url: http://$MASTER_IP.nip.io
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
+    - if: '$ACTIVATE_BACKUP == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
   allow_failure: true
 
 monitoring:general:
@@ -335,7 +341,7 @@ verify:prod:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
+    - if: '$ACTIVATE_VERIFY == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
 
 verify:dev:
   stage: verify
@@ -349,7 +355,7 @@ verify:dev:
     name: $ENVIRONMENT
     url: http://$MASTER_IP.nip.io
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
+    - if: '$ACTIVATE_VERIFY == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
 
 qa:dev:
   stage: qa
@@ -364,7 +370,7 @@ qa:dev:
     url: http://$MASTER_IP.nip.io
   allow_failure: true
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
+    - if: '$ACTIVATE_QA == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
 
 qa:prod:
   stage: qa
@@ -379,7 +385,7 @@ qa:prod:
     url: http://$MASTER_IP.nip.io
   allow_failure: true
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
+    - if: '$ACTIVATE_QA == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
 
 cleanup:dev:
   stage: cleanup
@@ -392,7 +398,7 @@ cleanup:dev:
     action: stop
   when: manual
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
+    - if: '$ACTIVATE_CLEANUP == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_DEV == "1"'
 
 cleanup:prod:
   stage: cleanup
@@ -404,6 +410,6 @@ cleanup:prod:
     name: $ENVIRONMENT
     action: stop
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
+    - if: '$ACTIVATE_CLEANUP == "1" && $CI_COMMIT_BRANCH =~ /^main|dev|dev_chris$/ && $ACTIVATE_PROD == "1"'
   when: manual
 
